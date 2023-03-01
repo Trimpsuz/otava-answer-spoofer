@@ -854,11 +854,13 @@ define('fi.cloubi.frontend.common.js@4.15.13/task', ['./utils', './material', '.
 
                     //Check if the answer is cached
                     if (taskState.answers[id]) {
+                        console.log(taskState.answers[id])
                         callMethodComplete(taskState, "loadAnswer", STATUS_CODE_SUCCESS, taskState.answers[id], currentRef);
                         return;
                     }
                     //Check if caching is done but the answer is null
                     else if (taskState.hasCachedAnswers) {
+                        console.log('Null answer')
                         callMethodComplete(taskState, "loadAnswer", STATUS_CODE_SUCCESS, null, currentRef);
                         return;
                     }
@@ -872,10 +874,12 @@ define('fi.cloubi.frontend.common.js@4.15.13/task', ['./utils', './material', '.
 
                             if (!response.answer) {
                                 //null answer
+                                console.log('Null answer')
                                 callMethodComplete(taskState, "loadAnswer", STATUS_CODE_SUCCESS, null, currentRef);
 
                             } else {
                                 //cache the answer and return it to the motor
+                                console.log(response.answer)
                                 taskState.answers[id] = response.answer;
                                 callMethodComplete(taskState, "loadAnswer", STATUS_CODE_SUCCESS, response.answer, currentRef);
 
@@ -909,16 +913,27 @@ define('fi.cloubi.frontend.common.js@4.15.13/task', ['./utils', './material', '.
 
                 try {
                     //Generate the answer object
-                    var data = {
-                        id: id,
-                        type: type,
-                        description: description,
-                        correctResponses: correctResponses,
-                        learnerResponse: correctResponses[0],
-                        result: 'correct'
-                    };
-                    console.log(data)
-                    //console.log('Spoofed answer stored')
+                    if (correctResponses) {
+                        var data = {
+                          id: id,
+                          type: type,
+                          description: description,
+                          correctResponses: correctResponses,
+                          learnerResponse: correctResponses[0],
+                          result: 'correct',
+                        };
+                        console.log('Spoofed answer stored')
+                      } else {
+                        var data = {
+                          id: id,
+                          type: type,
+                          description: description,
+                          correctResponses: correctResponses,
+                          learnerResponse: learnerResponse,
+                          result: result,
+                        };
+                      }
+                    
                     //Send the data to the server
                     var url = createPath.apply(this, [basePath, server, task, user, "answer"]);
 
@@ -1163,31 +1178,8 @@ define('fi.cloubi.frontend.common.js@4.15.13/task', ['./utils', './material', '.
                         section2.answerHasChanged = true;
                       }
                 }
-
-                console.log(data)
-    
-
-                /*const sections = Object.values(qobj["Sections"]);
-
-                qobj.answersCheckCount = sections.length;
-                qobj.wrongAnswersCount = 0;
-                qobj.answerHasChanged = true;
-                
-                for (const section of sections) {
-                    delete section["answer"];
-                    section.wrongAnswers = 0;
-                    section.locked = true;
-                    section.answerHasChanged = true;
-                }*/
-    
-                console.log(data)
-                /*for(var k in JSON.parse(data).Questions) {
-                    for(var section in JSON.parse(data).Questions[k].Sections) {
-                        console.log(JSON.parse(data).Questions[k].Sections[section]);
-                        JSON.parse(data).Questions[k].Sections[section] = {answersCheckCount: }
-                     }
-                 }*/
                  
+                console.log('Spoofed suspend data stored')
                 
                 try {
                     //Send the data to server
@@ -1420,6 +1412,8 @@ define('fi.cloubi.frontend.common.js@4.15.13/task', ['./utils', './material', '.
                         graded = 1;
                     }
 
+                    if(taskState.answers[sectionId].correctResponses[0]) {
+                        
                     var postData = {
                         questionId: questionId,
                         sectionId: sectionId,
@@ -1427,6 +1421,19 @@ define('fi.cloubi.frontend.common.js@4.15.13/task', ['./utils', './material', '.
                         score: 1,
                         graded: graded
                     };
+                    console.log('Spoofed structure answer stored')
+                    } else {
+                        
+                    var postData = {
+                        questionId: questionId,
+                        sectionId: sectionId,
+                        answer: answer,
+                        score: score,
+                        graded: graded
+                    };
+                    }
+
+                    
 
                     var currentMaterial;
                     var currentPage;
