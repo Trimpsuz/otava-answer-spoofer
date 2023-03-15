@@ -1,4 +1,4 @@
-define('fi.cloubi.frontend.common.js@4.15.13/task', ['./utils', './material', './dialog', './adaptivity', './bigimage'], function (utils, material, dialogs, adaptivity, bigimage) {
+define('fi.cloubi.frontend.common.js@4.15.19/task', ['./utils', './material', './dialog', './adaptivity', './bigimage'], function (utils, material, dialogs, adaptivity, bigimage) {
 
     var TYPE_UI_MODULE = 2;
     var TYPE_ANSWER_MODULE = 3;
@@ -1071,7 +1071,7 @@ define('fi.cloubi.frontend.common.js@4.15.13/task', ['./utils', './material', '.
 
                         var postData = {
                             score: taskState.scoreMax,
-                            progressMeasure: progressMeasure,
+                            progressMeasure: 1,
                             scoreMax: taskState.scoreMax
                         };
 
@@ -1178,6 +1178,8 @@ define('fi.cloubi.frontend.common.js@4.15.13/task', ['./utils', './material', '.
                         section2.answerHasChanged = true;
                       }
                 }
+
+                data = JSON.stringify(data)
                  
                 console.log('Spoofed suspend data stored')
                 
