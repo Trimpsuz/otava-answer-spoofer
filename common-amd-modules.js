@@ -1,5 +1,632 @@
 //THIS IS THE NEW WAY OTAVA USES, BASICALLY SAME THING AS BEFORE BUT MULTIPLE FILES ARE NOW COMBINED INTO THIS ONE FILE, search for "/task" to find the part we edit
 //THIS FILE IS FOUND IN materiaalit.otava.fi/html/js/
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/notes', ['./utils', './material'], function(utils, material) {
+	
+	/**
+	 Contains functions for loading and manipulating user notes.
+	 <br><br>
+	 These function are intended to be used within materials. If used outside materials, make sure to always manually provide material and page IDs
+	 <br><br>
+	 
+	 To use this API, load it like this:
+	 
+	 <pre><code>
+	require(['fi.cloubi.frontend/notes'], function(notes) {
+		notes.getNotesForPage(function(response) {
+			console.log(response);
+		});
+	});
+	 </code></pre>
+	 
+	 * @namespace notes */
+	
+	/**Represents a single note object. Topic, data, material and page are only included if the note was requested with includeExtra = true.
+	 * @memberof notes
+	 * @typedef {Object} Note
+	 * @property {string} id			The unique ID of the note
+	 * @property {string} time			A human-readable string describing when the note was last modified
+	 * @property {string} text			The text content of the note
+	 * @property {string} [topic]		The topic of the note
+	 * @property {Object} [data]		Extra JSON data stored with the note
+	 * @property {Number} [material]	The ID of the material containing the note
+	 * @property {string] [page]		The ID of the page containing the note*/
+	
+	/**Represents an error encountered during processing. Possible values:
+	 * <ul>
+	 * <li><b>no-type-specified</b> A note type parameter was required but not specified</li>
+	 * <li><b>no-material-specified</b> A material ID parameter was required but not specified</li>
+	 * <li><b>no-page-specified</b> A page ID parameter was required but not specified</li>
+	 * <li><b>no-id-specified</b> A note ID parameter was required but not specified</li>
+	 * <li><b>no-such-note</b> The specified note was not found</li>
+	 * <li><b>not-owner</b> The request tried to modify a note that does not belong to the current user</li>
+	 * <li><b>no-such-material</b> The request referenced a material that does not exist</li>
+	 * <li><b>no-material-access</b> The request referenced a material that the user is not allowed to access</li>
+	 * <li><b>no-such-page</b> The request referenced a material page that does not exist</li>
+	 * <li><b>type-not-readable</b> Notes of the specified type cannot be accessed through this API</li>
+	 * <li><b>type-not-modifiable</b> Notes of the specified type cannot be added, modified or deleted through this API</li>
+	 * </ul>
+	 * @memberof notes
+	 * @typedef {string} Error*/
+	
+	/**A callback that receives an array of notes.
+	 * @memberof notes
+	 * @callback NotesCallback
+	 * @param {Object} resp					The response from the server
+	 * @param {notes.Note[]} [resp.notes]	The requested notes, if there were no errors with the request
+	 * @param {notes.Error[]} resp.errors	An array containing any errors encountered during the request*/
+	
+	/**A callback that receives note counts.
+	 * @memberof notes
+	 * @callback CountsCallback
+	 * @param {Object} resp					The response from the server
+	 * @param {Object} [resp.counts]		An object that maps page IDs to the number of notes on that page
+	 * @param {number} [resp.total]			The total number of notes in the material
+	 * @param {notes.Error[]} resp.errors	An array containing any errors encountered during the request*/
+	
+	/**A callback that receives the info of a newly created note.
+	 * @memberof notes
+	 * @callback NewNoteCallback
+	 * @param {Object} resp					The response from the server
+	 * @param {string} [resp.id]			The ID of the new note
+	 * @param {string} [resp.time]			A human-readable string describing when the note was last modified
+	 * @param {notes.Error[]} resp.errors	An array containing any errors encountered during the request*/
+	 
+	 /**A callback invoked after a note has been modified
+	 * @memberof notes
+	 * @callback NoteModifiedCallback
+	 * @param {Object} resp					The response from the server
+	 * @param {notes.Error[]} resp.errors	An array containing any errors encountered during the request*/
+	
+	/**A callback that receives a material page ID
+	 * @memberof notes
+	 * @callback PageIDCallback
+	 * @param {string} [pageId]	The page ID or undefined if the page ID is not available*/
+	
+	/**
+	 * A callback that receives a note changed event
+	 * @memberof notes
+	 * @callback NoteChangedCallback
+	 * @param {int} noteChangedEventType Whether the note was 1 created, 2 updated, 3 deleted.
+	 * @param {string} noteId The note's ID.
+	 * @param {Object} payload The note's updated data.
+	 */
+	
+	/**Request parameter name for note ID*/
+	var PARAM_ID = "id";
+	/**Request parameter name for note type*/
+	var PARAM_TYPE = "type";
+	/**Request parameter name for material ID*/
+	var PARAM_MATERIAL = "material";
+	/**Request parameter name for page ID*/
+	var PARAM_PAGE = "page";
+	/**Request parameter name for indicating whether to include extra data*/
+	var PARAM_INCLUDE_EXTRA = "includeExtra";
+	/**Request parameter name for note content text*/
+	var PARAM_TEXT = "text";
+	/**Request parameter name for note topic*/
+	var PARAM_TOPIC = "topic";
+	/**Request parameter name for note extra data*/
+	var PARAM_DATA_JSON = "data";
+	/**Request parameter name for note last modified time*/
+	var PARAM_LAST_MODIFIED = "time";
+	/**Request parameter name for an array of notes*/
+	var PARAM_NOTES = "notes";
+	/**Request parameter name for a total note count*/
+	var PARAM_TOTAL = "total";
+	/**Request parameter name for an array of errors*/
+	var PARAM_ERRORS = "errors";
+	/**Request parameter name for an object containing per-page note counts*/
+	var PARAM_COUNTS = "counts";
+	
+	/**Default note type*/
+	var TYPE_NOTE = "note";
+	/**The server endpoint for the notes API*/
+	var ENDPOINT = "/o/material-notes/";
+	
+	/** The different typese of note changed events */
+	var NOTE_CHANGED_TYPES = {
+		Created: 1,
+		Updated: 2,
+		Deleted: 3
+	}
+	
+	var noteChangedListeners = []
+	
+	/**Gets all notes on a page
+	 * @memberof notes
+	 * @param {notes.NotesCallback} [callback]			A callback to handle the data
+	 * @param {boolean} [includeExtra=false]			Whether to include topic and dataJSON in note data
+	 * @param {number} [materialId=current material ID]	The ID of the material containing the notes
+	 * @param {string} [pageId=current page ID]			The ID of the page containing the notes
+	 * @param {string} [type="note"]					The type of notes to get*/
+	function getNotesForPage(callback, includeExtra, materialId, pageId, type){
+		materialId = materialId || material.getCurrentMaterialId();
+		pageId = pageId || material.getCurrentPageId();
+		type = type || TYPE_NOTE;
+		
+		var params = {};
+		params[PARAM_MATERIAL] = materialId;
+		params[PARAM_PAGE] = pageId;
+		params[PARAM_TYPE] = type;
+		params[PARAM_INCLUDE_EXTRA] = includeExtra;
+		
+		utils.post(ENDPOINT + "get-notes-for-page", params, callback);
+	}
+	
+	/**Gets all notes in a material
+	 * @memberof notes
+	 * @param {notes.NotesCallback} [callback]			A callback to handle the data
+	 * @param {boolean} [includeExtra=false]			Whether to include topic and dataJSON in note data
+	 * @param {number} [materialId=current material ID]	The ID of the material containing the notes
+	 * @param {string} [type="note"]					The type of notes to get*/
+	function getNotesForMaterial(callback, includeExtra, materialId, type){
+		materialId = materialId || material.getCurrentMaterialId();
+		type = type || TYPE_NOTE;
+		
+		var params = {};
+		params[PARAM_MATERIAL] = materialId;
+		params[PARAM_TYPE] = type;
+		params[PARAM_INCLUDE_EXTRA] = includeExtra;
+		
+		utils.post(ENDPOINT + "get-notes-for-material", params, callback);
+	}
+	
+	/**Gets the per-page counts of all notes in a material
+	 * @memberof notes
+	 * @param {notes.CountsCallback} [callback]			A callback to handle the data
+	 * @param {number} [materialId=current material ID]	The ID of the material containing the notes
+	 * @param {string} [type="note"]					The type of notes to get*/
+	function getNoteCounts(callback, materialId, type){
+		materialId = materialId || material.getCurrentMaterialId();
+		type = type || TYPE_NOTE;
+		
+		var params = {};
+		params[PARAM_MATERIAL] = materialId;
+		params[PARAM_TYPE] = type;
+		
+		utils.post(ENDPOINT + "get-counts", params, callback);
+	}
+	
+	/**Creates a new note on a page
+	 * @memberof notes
+	 * @param {notes.NewNoteCallback} [callback]		A callback invoked after the note has been created
+	 * @param {string} [text]							The text content of the note
+	 * @param {string} [topic]							The topic of the note
+	 * @param {Object} [data]							Extra JSON data to include with the note
+	 * @param {number} [materialId=current material ID]	The ID of the material containing the note. Should always be specified if pageId is present.
+	 * @param {string} [pageId=current page ID]			The ID of the page containing the note
+	 * @param {string} [type="note"]					The type of the note*/
+	function addNoteToPage(callback, text, topic, data, materialId, pageId, type){
+		materialId = materialId || material.getCurrentMaterialId();
+		pageId = pageId || material.getCurrentPageId();
+		type = type || TYPE_NOTE;
+		
+		var params = {};
+		params[PARAM_MATERIAL] = materialId;
+		params[PARAM_PAGE] = pageId;
+		params[PARAM_TYPE] = type;
+		params[PARAM_TEXT] = text;
+		params[PARAM_TOPIC] = topic;
+		params[PARAM_DATA_JSON] = data;
+		
+		utils.post(
+			ENDPOINT + "insert-note", 
+			params, 
+			function(response) { 
+				callback(response); 
+				
+				noteChanged(NOTE_CHANGED_TYPES.Created, 
+					response.id, 
+					{	
+						text: text, 
+						topic: topic, 
+						data: data, 
+						materialId: materialId, 
+						pageId: pageId,
+						type: type
+					}
+				);
+			}
+		);
+		
+	}
+	
+	/**Creates a new note on a material
+	 * @memberof notes
+	 * @param {notes.NewNoteCallback} [callback]		A callback invoked after the note has been created
+	 * @param {string} [text]							The text content of the note
+	 * @param {string} [topic]							The topic of the note
+	 * @param {Object} [data]							Extra JSON data to include with the note
+	 * @param {number} [materialId=current material ID]	The ID of the material containing the note
+	 * @param {string} [type="note"]					The type of the note*/
+	function addNoteToMaterial(callback, text, topic, data, materialId, type){
+		materialId = materialId || material.getCurrentMaterialId();
+		type = type || TYPE_NOTE;
+		
+		var params = {};
+		params[PARAM_MATERIAL] = materialId;
+		params[PARAM_TYPE] = type;
+		params[PARAM_TEXT] = text;
+		params[PARAM_TOPIC] = topic;
+		params[PARAM_DATA_JSON] = data;
+		
+		utils.post(
+			ENDPOINT + "insert-note", 
+			params,
+			function(response) { 
+				callback(response); 
+				
+				noteChanged(NOTE_CHANGED_TYPES.Created, 
+					response.id, 
+					{	
+						text: text, 
+						topic: topic, 
+						data: data, 
+						materialId: materialId, 
+						type: type
+					}
+				);
+			}
+		);
+	}
+	
+	/**Updates an existing note. Pass undefined to leave a field unchanged, passing null will set it to empty.
+	 * @memberof notes
+	 * @param {string} id								The ID of the note to update
+	 * @param {notes.NoteModifiedCallback} [callback]	A callback invoked after the note has been updated
+	 * @param {string} [text]							The text content of the note
+	 * @param {string} [topic]							The topic of the note
+	 * @param {Object} [data]							Extra JSON data to include with the note
+	 * @param {number} [materialId]						The ID of the material containing the note. Should always be specified if pageId is present.
+	 * @param {string} [pageId]							The ID of the page containing the note. Should always be specified if materialId is present 
+	 * 													(pass null to associate the note to the material itself).
+	 * @param {string} [type]							The type of the note*/
+	function updateNote(id, callback, text, topic, data, materialId, pageId, type){
+		
+		var params = {};
+		params[PARAM_ID] = id;
+		params[PARAM_MATERIAL] = materialId;
+		params[PARAM_PAGE] = pageId;
+		params[PARAM_TYPE] = type;
+		params[PARAM_TEXT] = text;
+		params[PARAM_TOPIC] = topic;
+		params[PARAM_DATA_JSON] = data;
+		
+		utils.post(
+			ENDPOINT + "update-note", 
+			params, 
+			function(response) { 
+				callback(response); 
+				
+				noteChanged(NOTE_CHANGED_TYPES.Updated, 
+					response.id, 
+					{
+						text: text, 
+						topic: topic, 
+						data: data, 
+						materialId: materialId, 
+						pageId: pageId,
+						type: type
+					}
+				);
+			}
+		);
+	}
+	
+	/**Deletes a note
+	 * @memberof notes
+	 * @param {string} id								The ID of the note to update
+	 * @param {notes.NoteModifiedCallback} [callback]	A callback invoked after the note has been deleted*/
+	function deleteNote(id, callback){
+		var params = {};
+		params[PARAM_ID] = id;
+		
+		utils.post(
+			ENDPOINT + "delete-note", 
+			params, 
+			function(response) {
+				callback(response);
+				noteChanged(NOTE_CHANGED_TYPES.Deleted, id);
+			}
+		);
+	}
+	
+	/**Gets an URL that can be used to download a text file containing the user's notes on a page
+	 * @memberof notes
+	 * @param {number} [materialId=current material ID]	The ID of the material containing the note
+	 * @param {string} [pageId=current page ID]			The ID of the page containing the note
+	 * @return {string}	The URL*/
+	function getDownloadUrlForPageNotes(materialId, pageId){
+		materialId = materialId || material.getCurrentMaterialId();
+		pageId = pageId || material.getCurrentPageId();
+		return ENDPOINT + "text-notes?" + PARAM_MATERIAL + "=" + materialId + "&" + PARAM_PAGE + "=" + pageId;
+	}
+	
+	/**Gets an URL that can be used to download a text file containing the user's notes in a material
+	 * @memberof notes
+	 * @param {number} [materialId=current material ID]	The ID of the material containing the note
+	 * @return {string}	The URL*/
+	function getDownloadUrlForMaterialNotes(materialId){
+		materialId = materialId || material.getCurrentMaterialId();
+		return ENDPOINT + "text-notes?" + PARAM_MATERIAL + "=" + materialId;
+	}
+	
+	/**Gets the ID of the last page that the user has accessed in a material
+	 * @memberof notes
+	 * @param {notes.PageIDCallback} callback			A callback to handle the ID
+	 * @param {number} [materialId=current material ID]	The ID of the material*/
+	function getLastPageId(callback, materialId){
+		materialId = materialId || material.getCurrentMaterialId();
+		getNotesForMaterial(function(response){
+			if (response.notes && response.notes.length > 0){
+				callback(response.notes[0][PARAM_PAGE]);
+			}
+			else {
+				callback(undefined);
+			}
+		}, true, materialId, "lastpage");
+	}
+	
+	/**
+	 * Calls all the note changed listeners
+	 * 
+	 * @param {int} Event type
+	 * @param {string} Note's ID
+	 * @param {Object} New note data.
+	 */
+	function noteChanged(evtType, id, payload) {
+		noteChangedListeners.forEach(function(func){ func(evtType, id, payload) });
+	}
+	
+	
+	/**
+	 * Registers a change listener for when a note has been changed
+	 * @param {NoteChangedCallback} The callback listener
+	 */
+	function onNoteChanged(callback) {
+		noteChangedListeners.push(callback)
+	}
+	
+	/**
+	 * Removes a note changed listener
+	 * @param {NoteChangedCallback} The callback listener
+	 */
+	function offNoteChanged(callback) {		
+    	var idx = noteChangedListeners.findIndex(callback);
+    	
+		if(idx !== -1) {
+			noteChangedListeners.splice(idx, 1);
+		}
+	}
+ 	
+	return {
+		getNotesForPage: getNotesForPage,
+		getNotesForMaterial: getNotesForMaterial,
+		getNoteCounts: getNoteCounts,
+		addNoteToPage: addNoteToPage,
+		addNoteToMaterial: addNoteToMaterial,
+		updateNote: updateNote,
+		deleteNote: deleteNote,
+		getDownloadUrlForPageNotes: getDownloadUrlForPageNotes,
+		getDownloadUrlForMaterialNotes: getDownloadUrlForMaterialNotes,
+		getLastPageId: getLastPageId,
+		noteChanged: noteChanged,
+		onNoteChanged: onNoteChanged,
+		offNoteChanged: offNoteChanged,
+		NOTE_CHANGED_TYPES: NOTE_CHANGED_TYPES
+	};
+	
+});
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/gamification', ['./utils', './material'], function(utils, material) {
+	
+	/**
+	 Contains functions for interacting with Cloubi's gamification features.
+	 <br><br>
+	 These function are intended to be used within materials. If used outside materials, make sure to always manually provide material IDs.
+	 <br><br>
+	 
+	 To use this API, load it like this:
+	 
+	 <pre><code>
+	require(['fi.cloubi.frontend/gamification'], function(gamification) {
+		gamification.isEnabled().then( function(enabled) {
+			if (enabled) console.log("Gamification is enabled");
+			else console.log("Gamification is disabled");
+		});
+	});
+	 </code></pre>
+	 
+	 * @namespace gamification */
+	
+	/**An array of errors encountered while executing a request.
+	 * All gamification functions except isEnabled will return the error "no-such-realm" if the function is called for a material
+	 * that does not have gamification features enabled.
+	 * @memberof gamification
+	 * @typedef {Array} Error*/
+	
+	/**Represents an achievement that the player can level up by meeting certain criteria.
+	 * @memberof gamification
+	 * @typedef {Object} Achievement
+	 * @property {string} id									The ID of this achievement
+	 * @property {string} title 								The name of this achievement
+	 * @property {string} description							The description of this achievement
+	 * @property {string} [group]								The name of the achievement group this achievement belongs to (if any)
+	 * @property {number} level									The user's current level number in this achievement. 
+	 * 															Level 0 means that the achievement has not yet been unlocked.
+	 * @property {gamification.AchievementLevel} currentLevel	The data of the user's current level in this achievement.
+	 * @property {gamification.AchievementLevel} [nextLevel]	The data of the user's next level in this achievement, if any.*/
+	
+	/**Represents a single level in an achievement. Each level must be unlocked separately and has its own unlock criteria.
+	 * @memberof gamification
+	 * @typedef {Object} AchievementLevel
+	 * @property {string} title			The name of this level
+	 * @property {string} description	The description of this level
+	 * @property {string} awardText		Text that should be shown to the user when this level is unlocked
+	 * @property {string} [badgeImage]	A download URL for a small image representing this level
+	 * @property {string} [largeImage]	A download URL for a large image representing this level*/
+	
+	/**An avatar that the player may select to represent themselves.
+	 * @memberof gamification
+	 * @typedef {Object} Avatar
+	 * @property {string} id			The ID of this avatar
+	 * @property {string} name			The default name of this avatar
+	 * @property {string} description	A description of this avatar
+	 * @property {string} [largeImage]	A download URL for a large image representing this avatar
+	 * @property {string} [markerImage]	A download URL for a small image representing this avatar*/
+	
+	/**Contains the status of the current user
+	 * @memberof gamification
+	 * @typedef {Object} Player
+	 * @param {string} name					The player's name
+	 * @param {boolean} hasAvatar			True if the player has chosen an avatar
+	 * @property {string} [largeImage]		A download URL for a large image representing the player's avatar
+	 * @property {string} [markerImage]		A download URL for a small image representing the player's  avatar
+	 * @property {Array<String>} overlays	An array of download URLs to images that should be drawn over the player's avatar*/
+	
+	
+	var BASE_URL="/o/gamification/";	
+	var PARAM_MATERIAL = "materialId";
+	
+	var enabledMaterials = {};
+	
+	/**Checks whether gamification features have been enabled for the specified product
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material to check
+	 * @return {Promise<boolean, gamification.Error>}	Resolves to true if gamification is enabled, false otherwise*/
+	function isEnabled(materialId){
+		var cacheKey = materialId || material.getCurrentMaterialId();
+		if ( enabledMaterials[cacheKey] ) {
+			return enabledMaterials[cacheKey]; 
+		} else {
+			var promise = _postWithPromise("enabled", materialId, {}, function(d, result) {
+				if (result.enabled){
+					d.resolve(true);
+				}
+				else {
+					d.resolve(false);
+				}
+			});
+			enabledMaterials[cacheKey] = promise;
+			return promise;
+		}
+	}
+	
+	/**Loads all achievements that are currently visible to the player in the specified material
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of achievements in the current material*/
+	function getAchievements(materialId){
+		return _doGetAchievements("achievements", materialId);
+	}
+	
+	/**Loads all achievements that the player has unlocked but have not yet been marked as shown. Note that this does not perform checks to see
+	 * if any new achievements have been unlocked, use {@link gamification.checkAchievements} to also check for new achievements.
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of pending achievements*/
+	function getPendingAchievements(materialId){
+		return _doGetAchievements("pending-achievements", materialId);
+	}
+	
+	/**Checks if any new achievements have been unlocked and then loads all achievements that the player has unlocked but have not yet been 
+	 * marked as shown. To load pending achievements without checking for new ones, use {@link gamification.getPendingAchievements}
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of pending achievements*/
+	function checkAchievements(materialId){
+		return _doGetAchievements("check-achievements", materialId);
+	}
+	
+	/**Common handler for functions that return achievements*/
+	function _doGetAchievements(action, materialId){
+		return _postAndHandleSuccess(action, materialId, {}, "achievements");
+	}
+	
+	/**Marks achievements as notified, so that they will no longer appear in the user's list of pending achievements
+	 * @memberof gamification
+	 * @param {Array<String>} achievements				An array of achievement IDs
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<undefined, gamification.Error>}	Resolves when the request has been executed*/
+	function markAchievements(achievements, materialId){
+		return _postAndHandleSuccess("mark-achievements", materialId, {achievements: achievements});
+	}
+	
+	/**Loads all avatars in the specified material
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<Array<gamification.Avatar>, gamification.Error>}	Resolves to an array of avatars in the current material*/
+	function getAvatars(materialId){
+		return _postAndHandleSuccess("avatars", materialId, {}, "avatars");
+	}
+	
+	/**Gets current player status in the specified material
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<gamification.Player, gamification.Error>}	Resolves to the current player status*/
+	function getPlayerStatus(materialId){
+		return _postAndHandleSuccess("player-status", materialId, {}, "player");
+	}
+	
+	/**Sets the player's avatar in the specified material
+	 * @memberof gamification
+	 * @param {string} name								The name that the player has chosen
+	 * @param {string} avatarId							The ID of avatar that the player has chosen
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<undefined, gamification.Error>}	Resolves when the request has been executed*/
+	function setAvatar(name, avatarId, materialId){
+		return _postAndHandleSuccess("set-avatar", materialId, {name: name, avatar: avatarId});
+	}
+	
+	/**Posts an action, resolves the promise with a specified result field or rejects with any errors from the server
+	 * @param resultFieldName	The name of the field in the result object that should be used to resolve the promise*/
+	function _postAndHandleSuccess(action, materialId, data, resultFieldName){
+		return _postWithPromise(action, materialId, data, function(d, result) {
+			if (result.success){
+				if (resultFieldName){
+					d.resolve(result[resultFieldName]);
+				}
+				else {
+					d.resolve();
+				}
+			}
+			else {
+				d.reject(result.errors);
+			}
+		});
+	}
+	
+	/**Posts an AJAX call to the gamification endpoint and returns a promise
+	 * @param action		The name of the action that should be invoked
+	 * @param materialId	The material ID to send (default: current material ID)
+	 * @param data			The data to send
+	 * @param processor		A callback function to process the response. Receives the Deferred object of the promise as well as the server response
+	 * 						as parameters and should either reject or resolve the Deferred based on the response data.*/
+	function _postWithPromise(action, materialId, data, processor){
+		var deferred = new $.Deferred();
+		data[PARAM_MATERIAL] = materialId || material.getCurrentMaterialId();
+		utils.post(BASE_URL + action, data, function(result){
+			processor(deferred, result);
+		},
+		function(error){
+			deferred.reject([error]);
+		})
+		return deferred.promise();
+	}
+	
+	return {
+		isEnabled: isEnabled,
+		getAchievements: getAchievements,
+		getPendingAchievements: getPendingAchievements,
+		checkAchievements: checkAchievements,
+		markAchievements: markAchievements,
+		getAvatars: getAvatars,
+		getPlayerStatus: getPlayerStatus,
+		setAvatar: setAvatar
+	}
+	
+});
+
 define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/search', ['./utils', './material'], function(utils, material) {
 	
 	/**Contains functions for searching materials and notes. To use this API, load it like this:
@@ -148,42 +775,6 @@ define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/search', ['./utils', './mate
 		reindex: reindex,
 		getEnabledFilters: getEnabledFilters
 	}
-});
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/translations', ['fi.cloubi.frontend.common.js/rest-client'], function (RestClient) {
-
-  var url = window.location.origin + "/o/rest/v1/";
-  var restClient = new RestClient(url);
-  var locale = null;
-  
-  function translateKeys() {
-    return translateAll(Array.prototype.slice.call(arguments));
-  }
-
-  function translateAll(keyArray) {
-    var data = {
-      locale: locale,
-      keys: Array.isArray(keyArray) ? keyArray : [keyArray]
-    };
-    
-    return restClient.POST("translations", data);
-  }
-
-  function setLocale(l) {
-    locale = l;
-  }
-  
-  function getLocale() {
-    return locale;
-  }
-
-  return {
-    translateKeys: translateKeys,
-    translateAll: translateAll,
-    setLocale: setLocale,
-    getLocale: getLocale
-  };
-
 });
 
 define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/adaptivity', ['./utils', './material'], function(utils, material) {
@@ -2821,631 +3412,3795 @@ define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/material', ['./utils'], func
 
 
 
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/gamification', ['./utils', './material'], function(utils, material) {
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/dialog', ['./utils'], function(utils) {
+
+	var dialogMap = {};
+	var resizeListenerCreated = false;
+
+	function postActionAndPollUntilReady(dialog, actionUrl, pollUrl, data, callback) {
+
+		callback = callback || utils.reload;
+
+		loading(dialog);
+
+		utils.post(actionUrl, data, function() {
+
+			utils.pollUntilReady(pollUrl, callback, function(progressInformation) {
+
+				loadingStatus(dialog, progressInformation);
+
+			});
+
+		});
+
+	}
+
+	function loading(dialog, keep) {
+
+		dialog = resolveDialog(dialog);
+
+		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
+
+		dialog.dialog.find('.cloubi-modal-dialog-footer input').attr("disabled", "disabled");
+
+		if ( keep ) {
+			dialog.dialog.find('.cloubi-modal-dialog-content').hide();
+			dialog.dialog.find('.cloubi-modal-dialog-content-wrapper').append(loadingAnimation);
+		} else {
+			dialog.dialog.find('.cloubi-modal-dialog-content').empty().append(loadingAnimation);
+		}
+
+	}
+
+	function removeLoading(dialog) {
+
+		dialog = resolveDialog(dialog);
+
+		dialog.dialog.find('.cloubi-modal-dialog-footer input').removeAttr("disabled");
+
+		dialog.dialog.find('.cloubi-modal-dialog-content').show();
+
+		dialog.dialog.find('.cloubi-modal-dialog-loading-animation').remove();
+
+	}
+
+	function loadingStatus(dialog, data) {
+
+		dialog = resolveDialog(dialog);
+
+		var statusText = dialog.dialog.find(".cloubi-modal-dialog-status-text");
+
+		if ( statusText.length == 0 ) {
+
+			statusText = jQuery('<div class="cloubi-modal-dialog-status-text"></div>');
+
+			dialog.dialog.find('.cloubi-modal-dialog-content').append(statusText);
+
+		}
+
+		var text = "";
+
+		if ( data.percent ) {
+			text = data.percent + "% " + Liferay.Language.get('cloubi-dialog-percent-complete');
+		} else {
+			text = Liferay.Language.get('cloubi-dialog-job-is-running');
+		}
+
+		statusText.text(text);
+
+	}
+
+	function clearFooter(dialog) {
+
+		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
+
+		footer.empty();
+
+	}
+
+	function createButton(dialog, callback, text, extraClass, saveDisabled) {
+
+		var button = jQuery('<input type="button" class="btn btn-primary" value="" />');
+
+		if ( extraClass ) {
+			button.addClass(extraClass);
+		}
+
+		button.attr("value", text);
+
+		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
+
+		if ( callback ) {
+			button.click(function() {
+				callback(dialog);
+			});
+		}
+
+		footer.append(button);
+
+		if ( text === Liferay.Language.get('cloubi-dialog-save') && saveDisabled ) {
+			setSaveEnabled(dialog, false);
+		}
+
+	}
+
+	function createButtons(dialog, callback, saveText, cancelText, saveDisabled) {
+
+		clearFooter(dialog);
+
+		createButton(dialog, callback, saveText, "save-button", saveDisabled);
+
+		createButton(dialog, function() {
+			closeDialog(dialog);
+		}, cancelText, "cancel-button");
+
+	}
+
+	function closeDialog(dialog) {
+
+		dialog = resolveDialog(dialog);
+
+		if ( dialog.closeCallback ) {
+			dialog.closeCallback();
+		}
+
+		dialog.curtain.remove();
+
+		dialogMap[dialog.name] = null;
+
+	}
+
+	function resolveDialog(dialog) {
+
+		if ( jQuery.type(dialog) === "string" ) {
+			return dialogMap[dialog];
+		} else {
+			return dialog;
+		}
+
+	}
+
+	function getDialog(name) {
+
+		return dialogMap[name];
+
+	}
+
+	function setDialogHeader(dialog, title) {
+
+		if ( title ) {
+
+			var header = dialog.dialog.find(".cloubi-modal-dialog-header");
+
+			header.text(title);
+
+		}
+
+	}
+
+	function saveOnly(dialog, callback, title, saveDisabled) {
+
+		dialog = resolveDialog(dialog);
+
+		clearFooter(dialog);
+
+		createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-save'), "save-button", saveDisabled);
+
+		setDialogHeader(dialog, title);
+
+	}
+
+	function saveAndCancel(dialog, callback, title, saveDisabled) {
+
+		dialog = resolveDialog(dialog);
+
+		createButtons(dialog, callback,
+				Liferay.Language.get('cloubi-dialog-save'),
+				Liferay.Language.get('cloubi-dialog-cancel'), saveDisabled);
+
+		setDialogHeader(dialog, title);
+
+	}
+
+	function setSaveEnabled(dialog, enabled) {
+
+		dialog = resolveDialog(dialog);
+
+		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
+		var button = footer.find(".save-button");
+
+		button.prop( "disabled", !enabled );
+
+	}
+
+	function yesAndNo(dialog, callback, title) {
+
+		dialog = resolveDialog(dialog);
+
+		createButtons(dialog, callback,
+				Liferay.Language.get('cloubi-dialog-yes'),
+				Liferay.Language.get('cloubi-dialog-no'));
+
+		setDialogHeader(dialog, title);
+
+	}
+
+	function closeOnly(dialog, title, callback) {
+
+		dialog = resolveDialog(dialog);
+
+		clearFooter(dialog);
+
+		if ( callback ) {
+			createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-close'));
+		} else {
+			createButton(dialog, function() {
+				dialog.curtain.remove();
+			}, Liferay.Language.get('cloubi-dialog-close'));
+		}
+
+		setDialogHeader(dialog, title);
+
+	}
+
+	/** Creates a dialog with a save button and a cross button that closes the dialog without saving
+	 * dialog 	A string identifying the dialog
+	 * callback	The callback function that is called when the dialog is saved
+	 * title	The title of the dialog
+	 * Any functions pushed to the dialog's closeListeners array will be executed when the dialog is closed with the cross button*/
+	function saveAndCross(dialog, callback, title) {
+
+		dialog = resolveDialog(dialog);
+
+		clearFooter(dialog);
+
+		createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-save'), 'save-button');
+
+		setDialogHeader(dialog, title);
+
+		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
+
+		cross.click( function() {
+			//Call the close listeners and then close the dialog
+			if (dialog.closeListeners && dialog.closeListeners.forEach){
+				dialog.closeListeners.forEach(function (elem){
+					elem();
+				});
+			}
+			dialog.curtain.remove();
+		});
+
+		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
+
+		header.append(cross);
+
+	}
+	
+	function createCross(dialog, callback){
+		dialog = resolveDialog(dialog);
+		
+		//Create the cross
+		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
+
+		//When the cross is clicked, execute the callback or just close
+		cross.click( function() {
+			if (callback){
+				callback();
+			}
+			else {
+				dialog.curtain.remove();
+			}
+		});
+
+		//Add the cross to header
+		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
+		header.append(cross);
+	}
+
+	/**Configures dialog with a header with a cross in the upper right corner and no footer
+	 * @param dialog	The name of the dialog to configure
+	 * @param title		The dialog title to display in the header
+	 * @param callback	A function to call when the cross is clicked, before the dialog closes*/
+	function crossOnly(dialog, title, callback) {
+
+		//Get dialog object
+		dialog = resolveDialog(dialog);
+
+		//Empty and hide footer
+		clearFooter(dialog);
+		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
+		footer.hide();
+
+		//Set dialog title
+		setDialogHeader(dialog, title);
+
+		//Create the cross
+		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
+
+		//When the cross is clicked, execute the callback and close
+		cross.click( function() {
+			if (callback){
+				callback();
+			}
+			dialog.curtain.remove();
+		});
+
+		//Add the cross to header
+		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
+		header.append(cross);
+
+	}
+
+	function crossOnlyWithOptions(dialog,title,options,callback) {
+		//Get dialog object
+		dialog = resolveDialog(dialog);
+
+		//Empty and hide footer
+		clearFooter(dialog);
+		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
+		footer.hide();
+
+		//Set dialog title
+		setDialogHeader(dialog, title);
+
+		//Create the cross
+		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
+
+		if (options && options.crossText) {
+			var crossText = jQuery('<span class="cloubi-modal-dialog-cross-text"></span>');
+			crossText.text(options.crossText);
+		}
+
+		cross.prepend(crossText);
+
+		//When the cross is clicked, execute the callback and close
+		cross.click( function() {
+			if (callback){
+				callback();
+			}
+			dialog.curtain.remove();
+		});
+
+		//Add the cross to header
+		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
+		header.append(cross);
+	}
+
+	function confirm(message, yesCallback, noCallback) {
+
+		var dialog = create(undefined, 'confirmDialog');
+
+		yesAndNo(dialog, function() {
+			closeDialog(dialog);
+			yesCallback();
+		}, Liferay.Language.get('cloubi-dialog-confirm-dialog-title'));
+
+		dialog.closeCallback = noCallback;
+
+		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
+
+		wrapper.text(message);
+
+		var content = dialog.dialog.find(".cloubi-modal-dialog-content");
+
+		content.append(wrapper);
+
+	}
+
+	function info(message, html, callback) {
+
+		var dialog = create(undefined, 'infoDialog');
+
+		closeOnly(dialog, Liferay.Language.get('cloubi-dialog-info-dialog-title'), callback);
+
+		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
+
+		if ( html ) {
+			wrapper.html(message);
+		} else {
+			wrapper.text(message);
+		}
+
+		var content = dialog.dialog.find(".cloubi-modal-dialog-content");
+
+		content.append(wrapper);
+
+	}
+
+	function resize() {
+
+		var height = jQuery(window).innerHeight() - 200;
+
+		jQuery(".cloubi-modal-dialog-content-wrapper").css("max-height", height + "px");
+
+	}
+
+	function initResize() {
+
+		if ( !resizeListenerCreated ) {
+
+			resizeListenerCreated = true;
+
+			jQuery(window).resize(resize);
+
+		}
+
+		resize();
+
+	}
+
+	function waiting(name) {
+
+		var curtain = jQuery('<div class="cloubi-modal-dialog-curtain cloubi-modal-dialog-old"></div>');
+		var dialog = jQuery('<div class="cloubi-modal-dialog"></div>');
+		var contentWrapper = jQuery('<div class="cloubi-modal-dialog-content-wrapper"></div>');
+		var content = jQuery('<div class="cloubi-modal-dialog-content"></div>');
+		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
+
+		curtain.append(dialog);
+
+		contentWrapper.append(content);
+
+		dialog.append(contentWrapper);
+
+		curtain.appendTo('body');
+
+		loadingAnimation.appendTo(content);
+
+		var dialogData = {
+			dialog: dialog,
+			curtain: curtain,
+			name: name
+		};
+
+		if ( name ) {
+			dialogMap[name] = dialogData;
+		}
+
+		initResize();
+
+		return dialogData;
+
+	}
+
+	/**Creates a new modal dialog
+	 * @param url		The url used to get the contents of the dialog
+	 * @param name		The name used to identify the dialog
+	 * @param optional	(optional)
+	 * @param parent	(optional) A jQuery element to which the dialog is appended.
+	 * 					If not specified, the dialog will be appended to body.*/
+	function create(url, name, optional, parent) {
+		//Create the HTML elements of the dialog
+		var curtain = jQuery('<div class="cloubi-modal-dialog-curtain cloubi-modal-dialog-old"></div>');
+		var dialog = jQuery('<div class="cloubi-modal-dialog"></div>');
+		var header = jQuery('<div class="cloubi-modal-dialog-header"></div>');
+		var contentWrapper = jQuery('<div class="cloubi-modal-dialog-content-wrapper"></div>');
+		var content = jQuery('<div class="cloubi-modal-dialog-content"></div>');
+		var footer = jQuery('<div class="cloubi-modal-dialog-footer"></div>');
+		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
+
+		//Nest the created elements
+		curtain.append(dialog);
+
+		contentWrapper.append(content);
+
+		dialog.append(header).append(contentWrapper).append(footer);
+
+		//If a parent element was supplied, append the dialog to it, otherwise append the dialog to the document body
+		if (parent){
+			curtain.appendTo(parent);
+		}
+		else {
+			curtain.appendTo('body');
+		}
+
+		//Load the content HTML from the supplied url
+		if ( url ) {
+			loadingAnimation.appendTo(content);
+			//Do html POST request if the url parameter looks like an object
+			if ( url.post && url.url && url.data ) {
+				utils.post(url.url, url.data, function(html) {
+					content.html(html);
+				}, undefined, 'html');
+			} else {
+				content.load(url);
+			}
+		}
+
+		var dialogData = {
+			dialog: dialog,
+			curtain: curtain,
+			name: name,
+			url: url,
+			optional: optional
+		};
+
+		//Save the dialog object locally so that it can be referenced from inside the dialog
+		if ( name ) {
+			dialogMap[name] = dialogData;
+		}
+
+		initResize();
+
+		return dialogData;
+
+	}
+
+	function reloadDialog(dialog) {
+
+		dialog = resolveDialog(dialog);
+
+		if ( dialog.url ) {
+
+			clearFooter(dialog);
+
+			var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
+
+			var content = dialog.dialog.find(".cloubi-modal-dialog-content");
+
+			content.empty().append(loadingAnimation).load(dialog.url);
+
+		}
+
+	}
+
+
+	function forceSize(dialog, width, height) {
+
+		dialog = resolveDialog(dialog);
+
+		var container = dialog.dialog;
+		var wrapper = container.find(".cloubi-modal-dialog-content-wrapper");
+
+		wrapper.css("height", height + "px");
+		container.css("width", width + "%");
+
+	}
+
+	/**Maximizes the size of a dialog, making it take up as much size as it needs (up to window size -100 on both axes)
+	 * @param dialog	The name of the dialog*/
+	function maximize(dialog) {
+		dialog = resolveDialog(dialog);
+
+		var container = dialog.dialog;
+		var wrapper = container.find(".cloubi-modal-dialog-content-wrapper");
+
+		//calculate maximum size
+		var height = window.innerHeight - 200;
+		var width = window.innerWidth - 200;
+
+		//maximize the dialog
+		wrapper.css("max-height", height + "px");
+		container.css("max-width", width + "px");
+	}
+
+	function showErrorMessage(elem, text) {
+		var parent = elem.parent();
+		var wrapper = parent.find(".alert.alert-danger");
+
+		if (wrapper.length == 0) {
+			wrapper = jQuery("<div class='alert alert-danger'></div>");
+			parent.prepend(wrapper);
+		}
+
+		wrapper.text(text);
+	}
+
+	function removeErrorMessage(elem) {
+
+		if ( elem != undefined && elem != null ) {
+			elem.parent().find(".alert-danger").remove();
+		}
+
+	}
+
+	function addClass(dialog, className) {
+
+		dialog = resolveDialog(dialog);
+
+		dialog.dialog.addClass(className);
+
+	}
+
+	function addCurtainClass(dialog, className) {
+		
+		dialog = resolveDialog(dialog);
+		
+		dialog.curtain.addClass(className);
+		
+	}
+	
+	function getContentElem(dialog){
+		dialog = resolveDialog(dialog);
+		return dialog.curtain.find(".cloubi-modal-dialog-content");
+	}
+	
+	function showLargeStaticContent(contentType, content, title, desc) {
+
+		var popup = jQuery('<div class="cloubi-large-content-popup"></div>');
+		var close = jQuery('<div class="cloubi-large-content-popup-close">X</div>');
+		var contentElem = jQuery('<div class="cloubi-large-content-popup-content"></div>');
+		var wrapper = jQuery('<div class="cloubi-large-content-wrapper"></div>');
+
+		wrapper.append(close);
+
+		var closeCallback = function() { popup.remove(); jQuery(window).off('.largecontent'); };
+		var ignoreCallback = function(e) { e.stopPropagation(); };
+
+		if ( contentType == 'image' ) {
+
+			if ( title ) {
+				var titleElem = jQuery('<div class="cloubi-large-content-popup-content-title"></div>');
+				titleElem.text(title).appendTo(contentElem);
+				titleElem.click(ignoreCallback);
+			}
+
+			var image = jQuery('<img class="cloubi-large-content-image" />');
+			image.attr("src", content);
+			image.appendTo(wrapper);
+			image.click(ignoreCallback);
+
+			if ( desc ) {
+				var descElem = jQuery('<div class="cloubi-large-content-popup-content-desc"></div>');
+				descElem.text(desc).appendTo(contentElem);
+				descElem.click(ignoreCallback);
+			}
+
+			var adjustSize = function() {
+
+				var margin = 40;
+				if (window.innerWidth < 768) {
+					margin = 10;
+				}
+
+				image.css("max-height", popup.height() - margin);
+				image.css("max-width", popup.width() - margin);
+			}
+
+			setTimeout(adjustSize, 100);
+
+			jQuery(window).on('resize.largecontent', adjustSize);
+
+		} else if ( contentType == 'html' ) {
+
+			contentElem.html(content);
+
+		}
+
+		close.click(closeCallback);
+		popup.click(closeCallback);
+
+		contentElem.append(wrapper);
+		popup.append(contentElem).appendTo("body");
+
+	}
+
+	return {
+		create: create,
+		saveAndCancel: saveAndCancel,
+		saveOnly: saveOnly,
+		yesAndNo: yesAndNo,
+		closeOnly: closeOnly,
+		saveAndCross: saveAndCross,
+		crossOnly: crossOnly,
+		crossOnlyWithOptions: crossOnlyWithOptions,
+		loading: loading,
+		removeLoading: removeLoading,
+		getDialog: getDialog,
+		forceSize: forceSize,
+		maximize: maximize,
+		closeDialog: closeDialog,
+		waiting: waiting,
+		setSaveEnabled: setSaveEnabled,
+		showErrorMessage: showErrorMessage,
+		removeErrorMessage: removeErrorMessage,
+		loadingStatus: loadingStatus,
+		postActionAndPollUntilReady: postActionAndPollUntilReady,
+		confirm: confirm,
+		info: info,
+		reloadDialog: reloadDialog,
+		addClass: addClass,
+		addCurtainClass: addCurtainClass,
+		createButton: createButton,
+		createCross: createCross,
+		setDialogHeader: setDialogHeader,
+		showLargeStaticContent: showLargeStaticContent,
+		getContentElem: getContentElem
+	};
+
+});
+
+
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/translations', ['fi.cloubi.frontend.common.js/rest-client'], function (RestClient) {
+
+  var url = window.location.origin + "/o/rest/v1/";
+  var restClient = new RestClient(url);
+  var locale = null;
+  
+  function translateKeys() {
+    return translateAll(Array.prototype.slice.call(arguments));
+  }
+
+  function translateAll(keyArray) {
+    var data = {
+      locale: locale,
+      keys: Array.isArray(keyArray) ? keyArray : [keyArray]
+    };
+    
+    return restClient.POST("translations", data);
+  }
+
+  function setLocale(l) {
+    locale = l;
+  }
+  
+  function getLocale() {
+    return locale;
+  }
+
+  return {
+    translateKeys: translateKeys,
+    translateAll: translateAll,
+    setLocale: setLocale,
+    getLocale: getLocale
+  };
+
+});
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/utils', ['fi.cloubi.frontend.common.js/translations'], function(translationsJS) {
+
+	/** Offers utility functions for other JavaScript classes
+	 * @namespace utils
+	 */
+	var cssFileCache = null;
+	var extensions = {};
+
+	if (typeof String.prototype.endsWith !== 'function') {
+	    String.prototype.endsWith = function(suffix) {
+	        return this.indexOf(suffix, this.length - suffix.length) !== -1;
+	    };
+	}
+
+	
+
+	var Language = {};
+
+	if ( self.Liferay && self.Liferay.Language && self.Liferay.Language.cloubi ) {
+		
+		Language.get = Liferay.Language.get;
+		
+	} else {
+		
+		var AUI = YUI();
+		
+		Language.get = function(key) {
+			return key;
+		};
+
+		AUI.use(
+			'io-base',
+			function(AUI) {
+				Language.get = AUI.cached(
+					function(key, languageId, extraParams) {
+						var instance = this;
+
+						var url = Liferay.ThemeDisplay.getPathContext() + '/language/' + languageId + '/' + key + '/';
+
+						if (extraParams) {
+							if (typeof extraParams == 'string') {
+								url += extraParams;
+							}
+							else if (Array.isArray(extraParams)) {
+								url += extraParams.join('/');
+							}
+						}
+
+						var headers = {
+							'X-CSRF-Token': Liferay.authToken
+						};
+
+						var value = '';
+
+						AUI.io(
+							url,
+							{
+								headers: headers,
+								method: 'GET',
+								on: {
+									complete: function(i, o) {
+										value = o.responseText;
+									}
+								},
+								sync: true
+							}
+						);
+
+						return value;
+					}
+				);
+			}
+		);
+		
+	}
+	
+	var _draggingOn = false;
+
+	$("body").on("touchstart", function(){
+		_draggingOn = false;
+	});
+
+	$("body").on("touchmove", function(){
+		_draggingOn = true;
+	});
+
+	/**
+	 * Checks if dragging is enable
+	 * @memberof utils
+	 * @return {boolean} True if dragging is enabled
+	 *
+	 */
+	function isDraggingOn() {
+		return _draggingOn;
+	}
+
+	/**
+	 * Sends a get request to the given url
+	 * @memberof utils
+	 * @param url				URL where the request is sent
+	 * @param successCallback	A function that is invoked on request success
+	 * @param failureCallback	A function that is invoked on request failure
+	 */
+	function get(url, successCallback, failureCallback, allowCache) {
+
+		var settings = {
+			url: url,
+			dataType: 'json',
+			type: 'GET',
+			timeout: 5 * 60 * 1000,
+			success: function(responseJSON) {
+				if ( successCallback != null ) {
+					successCallback.call(this, responseJSON);
+				}
+			},
+			error: function() {
+				if ( failureCallback != null ) {
+					failureCallback.call(this);
+				}
+			}
+		}
+
+		if(!allowCache)
+			settings.cache = false;
+
+		jQuery.ajax(settings);
+
+	}
+
+	/**
+	 * Returns html content from given url
+	 * @memberof utils
+	 * @param url				URL where the request is sent
+	 * @param successCallback	A function that is invoked on request success
+	 * @param failureCallback	A function that is invoked on request failure
+	 */
+	function getHtml(url, successCallback, failureCallback, allowCache) {
+		var settings = {
+			url: url,
+			dataType: 'html',
+			type: 'GET',
+			timeout: 5 * 60 * 1000,
+			success: function(html) {
+				if ( successCallback != null ) {
+					successCallback.call(this, html);
+				}
+			},
+			error: function(xhr, error) {
+				if ( failureCallback != null ) {
+					failureCallback.call(this, error);
+				}
+			}
+		};
+
+		if(!allowCache)
+			settings.cache = false;
+
+		jQuery.ajax(settings);
+
+	}
+
+	/**
+	 * Sends a post request to the given url
+	 * @memberof utils
+	 * @param url				URL where the request is sent
+	 * @param data				The data that is sent in the request
+	 * @param successCallback	A function that is called on request success
+	 * @param failureCallback	A function that is called on request failure
+	 * @param responseDataType	Data type of the data that is sent
+	 */
+	function post(url, data, successCallback, failureCallback, responseDataType) {
+
+		if ( !responseDataType ) {
+			responseDataType = 'json';
+		}
+
+		jQuery.ajax({
+			url: url,
+			dataType: responseDataType,
+			contentType: 'application/json; charset=UTF-8',
+			type: 'POST',
+			timeout: 5 * 60 * 1000,
+			data: JSON.stringify(data),
+			headers: {
+				'X-CSRF-Token': Liferay.authToken
+			},
+			success: function(responseData) {
+				if ( successCallback != null ) {
+					successCallback.call(this, responseData);
+				}
+			},
+			error: function(xhr, status) {
+				if ( failureCallback != null ) {
+					failureCallback.call(this, status);
+				}
+			},
+			skipReconnectCheck: failureCallback != null
+		});
+
+	}
+
+	// This version of post also returns request data for cases where the request info is required in resolution
+	function postWithRequestData(url, data, successCallback, failureCallback, responseDataType) {
+
+		if ( !responseDataType ) {
+			responseDataType = 'json';
+		}
+
+		return jQuery.ajax({
+			url: url,
+			dataType: responseDataType,
+			contentType: 'application/json; charset=UTF-8',
+			type: 'POST',
+			timeout: 5 * 60 * 1000,
+			data: JSON.stringify(data),
+			headers: {
+				'X-CSRF-Token': Liferay.authToken
+			},
+			success: function(responseData) {
+				if ( successCallback != null ) {
+					successCallback.call(this, data, responseData);
+				}
+			},
+			error: function(xhr, status) {
+				if ( failureCallback != null ) {
+					failureCallback.call(this, status);
+				}
+			},
+			skipReconnectCheck: failureCallback != null
+		});
+
+	}
+
+	var failingRequests = [];
+	var beforeUnload = function(event) {
+        event.preventDefault();
+        return '';
+    };
+    var spinnerTimeout = null;
+	var loadingSpinner = null;
+	var pendingRequests = 0;
+
+	var translatedLoadingText = Language.get('cloubi-dialog-job-is-running', translationsJS.getLocale());
+	var loadingSpinnerTemplate = '<div id="cloubi-utils-unsaved-data-flash-message"><span class="saving-in-progress"><i class="cloubi-utils-unsaved-data-flash-message-spinner fa-spin"></i><span id="cloubi-utils-unsaved-data-flash-message-text">' + translatedLoadingText + '</span></span></div>';
+
+	function postUntilSuccessful(url, data, successCallback, failureCallback, responseDataType) {
+
+        //Make request object so we can store the parameters and redo the request later
+        var request = {
+            url: url,
+            data: data,
+            successCallback: successCallback,
+            failureCallback: failureCallback,
+            responseDataType: responseDataType
+        }
+        pendingRequests++;
+        if (pendingRequests == 1) {
+            //If this is the first request, setup safety features
+
+            //Show spinner on timeout
+            spinnerTimeout = setTimeout(function() {
+                if (!loadingSpinner) {
+                    loadingSpinner = $(loadingSpinnerTemplate);
+                    $(document.body).append(loadingSpinner);
+                }
+            }, 2000);
+
+            //Register before unload handler
+            $(window).on('beforeunload', beforeUnload);
+        }
+
+        // Success handler
+        var finishRequest = function(originalRequest, responseData) {
+            //Finish the original request
+            originalRequest.successCallback(responseData);
+            pendingRequests--;
+
+            //If there are no more requests, clear safety features
+            if (pendingRequests == 0) {
+                //Clear spinner timeout
+                clearTimeout(spinnerTimeout);
+                //Remove loading spinner if it was already shown
+                if (loadingSpinner) {
+                    loadingSpinner.remove();
+                    loadingSpinner = null;
+                }
+                //Clear before unload function
+                $(window).off('beforeunload', beforeUnload);
+            }
+
+        }
+
+        // Failure handler: retries the request until it completes
+        var retryPost = function(failingRequest, delay) {
+            // Post the request, retry if it fails
+            post(failingRequest.url, failingRequest.data,
+            function(response) {
+                finishRequest(failingRequest, response)
+
+                //If there are more failing requests, play back the next one on the list
+                if (failingRequests.length > 0) {
+                    var next = failingRequests.shift();
+                    retryPost(next, 1);
+                }
+            },
+            function() {
+                // On failure, increase delay and retry after timeout
+                if (delay < 15) {
+                    delay++;
+                }
+                console.log("Post failed, retrying in " + delay + " seconds")
+                setTimeout(function() {retryPost(failingRequest, delay)}, delay * 1000);
+            }, failingRequest.responseDataType)
+        }
+
+        // If no requests have failed, run the request as normal
+	    if (failingRequests.length == 0) {
+	        post(url, data,
+	        function(response) {
+	            finishRequest(request, response)
+	        },
+	        function() {
+	            //If the request fails, push it to the failed request list
+	            failingRequests.push(request)
+
+	            if (failingRequests.length == 1) {
+                    //If this was the first failed request, start the retry loop
+                    retryPost(request, 1);
+	            }
+	        }, responseDataType)
+	    }
+	    else {
+	        //If there are already failing requests, add this to the list so it will be processed when previous ones are done
+	        failingRequests.push(request)
+	    }
+	}
 	
 	/**
-	 Contains functions for interacting with Cloubi's gamification features.
+	 * Uploads a file to the given url
+	 * @memberof utils
+	 * @param url				URL where the request is sent
+	 * @param params			The data that is sent in the request
+	 * @param file				The file that is uploaded with the request
+	 * @param successCallback	A function that is called on request success
+	 * @param failureCallback	A function that is called on request failure
+	 * @param filename			The part name of the file (default 'file')
+	 * @param responseDataType	Data type of the data that is sent
+	 */
+	function upload(url, params, file, successCallback, failureCallback, filename, responseDataType) {
+		responseDataType = responseDataType || 'json';
+		filename = filename || "file";
+		
+		var data = new FormData();
+		data.append(filename, file);
+		$.each(params, function(name, value){
+			data.append(name, value);
+		});
+
+		jQuery.ajax({
+			url: url,
+			dataType: responseDataType,
+			contentType: false,
+			enctype: 'multipart/form-data',
+			async: true,
+			type: 'POST',
+			timeout: 5 * 60 * 1000,
+			data: data,
+			processData: false,
+			headers: {
+				'X-CSRF-Token': Liferay.authToken
+			},
+			success: function(responseData) {
+				if ( successCallback != null ) {
+					successCallback.call(this, responseData);
+				}
+			},
+			error: function(xhr, status) {
+				if ( failureCallback != null ) {
+					failureCallback.call(this, status);
+				}
+			},
+			skipReconnectCheck: failureCallback != null
+		});
+	}
+
+	/**
+	 * Reloads the current page
+	 * @memberof utils
+	 */
+	function reload() {
+
+		self.location.reload();
+
+	}
+
+	/**
+	 * Polls URL until it is ready to complete the given callback function
+	 * @memberof utils
+	 * @param url		The URL that is being polled
+	 * @param callback	The callback function that is called when the URL is ready
+	 * @param tick
+	 */
+	function pollUntilReady(url, callback, tick) {
+
+		jQuery.ajax({
+			url: url,
+			dataType: 'json',
+			contentType: 'application/json; charset=UTF-8',
+			type: 'GET',
+			timeout: 5 * 60 * 1000,
+			data: '',
+			success: function(data) {
+				if ( data.hasJob ) {
+					if ( tick ) {
+						tick(data);
+					}
+					setTimeout( function() {
+						pollUntilReady(url, callback, tick);
+					}, 1000 );
+				} else {
+					callback();
+				}
+			},
+			error: function() {
+				callback();
+			},
+			cache: false
+		});
+
+	}
+
+	/** Returns a list of parameters in a function invocation
+	 * @memberof utils
+	 * @param invocation	The invocation
+	 * @return				A list of parameters in the invocation
+	 */
+	function parseFunctionInvocation(invocation) {
+
+		var start = invocation.indexOf("(");
+		var end = invocation.indexOf(")");
+
+		if ( start == -1 ) {
+			return {
+				name: invocation,
+				params: []
+			};
+		} else {
+			var name = invocation.substring(0, start);
+			var paramsStr = null;
+			if ( end == -1 ) {
+				paramsStr = invocation.substring(start+1);
+			} else {
+				paramsStr = invocation.substring(start+1, end);
+			}
+			var params = paramsStr.split(",");
+			return {
+				name: name,
+				params: params
+			};
+		}
+
+	}
+
+	/** This function seeks the specified DOM element and all it's child elements to see if they have a data-on-click attribute.
+	 * @memberof utils
+	 * @param container	The DOM element.
+	 * @param functions Object of functions that will listen events defined in trigger() -method or data-on-click attributes.
+	 * @param name		The name of the events that are listened to
+	 */
+	function attachListeners(container, functions, name) {
+
+		var attrName = "data-on-" + name;
+		var namespaced = name + ".from-data-attr";
+
+		container.find("[" + attrName + "]").each( function() {
+			var element = jQuery(this);
+			var invocation = parseFunctionInvocation(element.attr(attrName));
+			var func = functions[invocation.name];
+			if ( func ) {
+				element.on(namespaced, function(event) {
+					var params = invocation.params.slice(0);
+					params.push(event);
+					func.apply(this, params);
+				});
+			}
+		} );
+
+	}
+
+	/** Specifies listeners for events defined in trigger() method or directly in DOM using a special data-attributes.
+	 * @memberof utils
+	 * @param containerId	The id of the DOM element.
+	 * @param functions		Object of functions that will listen events defined in trigger() -method or data-on-click attributes.
+	 * @param onReady		Function that is executed when DOM is ready
+	 */
+	function listeners(containerId, functions, onReady) {
+
+		var container = jQuery("#" + containerId);
+
+		attachListeners(container, functions, "click");
+		attachListeners(container, functions, "dblclick");
+		attachListeners(container, functions, "change");
+		attachListeners(container, functions, "keyup");
+		attachListeners(container, functions, "touchend");
+
+		container.on("cloubi:custom-event.from-data-attr", function(event, name, data) {
+			var func = functions[name];
+			if ( func ) {
+				func(data);
+			}
+		});
+
+		if ( onReady ) {
+			jQuery(document).ready(onReady);
+		}
+
+	}
+
+	/**
+	 * Clears event listeners from the DOM element defined in listeners() -method.
+	 * @memberof utils
+	 * @param container	The container from which listeners are cleared from
+	 * @param name		The type of listeners that are being removed
+	 */
+	function clearListenersOfType(container, name) {
+
+		var attrName = "data-on-" + name;
+		var namespaced = name + ".from-data-attr";
+
+		container.find("[" + attrName + "]").off(namespaced);
+
+	}
+
+	/**
+	 * Clears listeners from container
+	 * @memberof utils
+	 * @param containerId	The id of the container for which listeners are cleared for
+	 */
+	function clearListeners(containerId) {
+
+		var container = jQuery("#" + containerId);
+
+		clearListenersOfType(container, "click");
+		clearListenersOfType(container, "change");
+		clearListenersOfType(container, "keyup");
+		clearListenersOfType(container, "touchend");
+
+		container.off("cloubi:custom-event.from-data-attr");
+
+	}
+
+	/**
+	 * Triggers Cloubi custom event for given DOM element.
+	 * @memberof utils
+	 * @param containerId	The id of the DOM element.
+	 * @param name			The name of the event
+	 * @param data			The event data.
+	 */
+	function trigger(containerId, name, data) {
+
+		var container = jQuery("#" + containerId);
+
+		container.trigger("cloubi:custom-event", [name, data]);
+
+	}
+
+	/**	Sets the given element as editable
+	 * @memberof utils
+	 * @param element	The element that is going to be edited
+	 * @param callback	Callback function that is called once the element has been edited
+	 */
+	function editable(element, callback) {
+
+		var text = element.text();
+
+		var editor = jQuery('<div class="cloubi-text-editable"></div>');
+		var field = jQuery('<input type="text" />');
+		var saveButton = jQuery('<button class="btn"><span class="fa fa-check"></span></button>');
+		var cancelButton = jQuery('<button class="btn"><span class="fa fa-times"></span></button>');
+
+		field.val(text);
+		editor.append(field, saveButton, cancelButton);
+
+		function doSave() {
+			callback(field.val(), element);
+			element.show();
+			editor.remove();
+		}
+
+		field.keyup( function(e) {
+			if ( e.keyCode == 13 ) {
+				doSave();
+			}
+		});
+
+		cancelButton.click(function() {
+			element.show();
+			editor.remove();
+		});
+
+		saveButton.click(doSave);
+
+		element.hide();
+
+		element.parent().append(editor);
+
+	}
+
+	/**
+	 * Returns session storage for the current page
+	 * @memberof utils
+	 * @return {Object} Session storage, if available
+	 */
+	function getStorage() {
+
+		try {
+
+			if ( window.sessionStorage ) {
+				var json = window.sessionStorage.getItem("Cloubi");
+				if ( json != null ) {
+					return JSON.parse(json);
+				}
+			}
+
+		} catch ( error ) {}
+
+		return {};
+
+	}
+
+	/**
+	 * Sets the session storage for the current page
+	 * @memberof utils
+	 * @param data	Session storage data
+	 */
+	function setStorage(data) {
+
+		try {
+
+			if ( window.sessionStorage ) {
+				window.sessionStorage.setItem("Cloubi", JSON.stringify(data));
+			}
+
+		} catch ( error ) {}
+
+	}
+
+	/**
+	 * This is a helper method to handle window.sessionStorage.
+	 *	If one wants to use the session storage, this method has to be used so that the session storage works perfectly in Cloubi 2.0.
+	 *	The namespace ensures that there can be multiple separate stores within the session storage.
+	 *	Puts value to session store.
+	 * @memberof utils
+	 * @param namespace		The name of the store.
+	 * @param key			The name for the value in the store.
+	 * @param value			The value put into the store.
+	 */
+	function putToSessionStore( namespace, key, value ) {
+		var data = getStorage();
+		data[namespace] = data[namespace] || {};
+		data[namespace][key] = value;
+		setStorage(data);
+	}
+
+	/**
+	 * Gets value from session store.
+	 * @memberof utils
+	 * @param namespace	The name of the store
+	 * @param key		The name for the value in the store.
+	 * @return {object}	The value put in the store. If the store has no value for the specified namespace and the key then null is returned.
+	 *
+	 */
+	function getFromSessionStore( namespace, key ) {
+		var data = getStorage();
+		if ( data[namespace] ) {
+			return data[namespace][key];
+		}
+		return null;
+	}
+
+	/**
+	 * Clears the store for the specified namespace from the session storage.
+	 * @memberof utils
+	 * @param namespace	The name of the store to clear
+	 */
+	function clearSessionStore( namespace ) {
+		var data = getStorage();
+		data[namespace] = {};
+		setStorage(data);
+	}
+
+	/**
+	 * Adds query parameter to url.
+	 * @memberof utils
+	 * @param url		Url where the query parameter is added
+	 * @param name		This will be set as query parameter name. Assumes that name complies with the query parameter name syntax rules
+	 * @param value		This will be set as query parameter value. Value is uri encoded so it can contain URI reserved characters
+	 * @return {string}	Url with the new query parameter added on it.
+	 */
+	function addUrlParameter(url, name, value) {
+	    if (url.indexOf('?') == -1) {
+	    	url = url + '?';
+	    }
+
+	    if (url.indexOf('=') >= 0) {
+	    	url = url + '&';
+	    }
+
+	    url = url + name + '=' + encodeURIComponent(value);
+	    return url;
+	}
+
+	/**
+	 * This method fetches GET parameter values.
+	 * @memberof utils
+	 * @param name		The name of the parameter that is returned
+	 * @return {string}	Parameter value
+	 */
+	function getUrlParameter(name) {
+	    var match = RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
+	    return match && decodeURIComponent(match[1].replace(/\+/g, ' '));
+	}
+
+	/**
+	 * Checks if the url has pathPart in its path. Here pathPart means the string between slashes in the path.
+	 * @memberof utils
+	 * @param name			Specifies the part of the path to find from the url path.
+	 * @return {boolean}	true, if the path part was found, otherwise false
+	 */
+	function hasUrlPathPart(name) {
+	    var pathParts = window.location.pathname.split('/');
+	    if (pathParts.length == 0)return false;
+
+	    return pathParts.indexOf(name) >= 0;
+
+	}
+
+	/**
+	 * Removes all css classes from element that starts with wildcard -parameter
+	 * @memberof utils
+	 * @param wildcard		Key used in removal operation of the element css classes
+	 * @param obj			The object from which classes are removed from
+	 * @return {function}
+	 */
+	function removeClassesWithWildcard(wildcard, obj) {
+
+		var patt = new RegExp('\\b' + wildcard + '\\S+',"g");
+
+		obj.removeClass(function (index, className) {
+			return (className.match(patt) || []).join(' ');
+		});
+
+	}
+
+	/**
+	 * Checks if a string starts with a certain prefix
+	 * @memberof utils
+	 * @param str			The string that is being checked for the prefix
+	 * @param prefix		The prefix for which the string is being checked for
+	 * @return {boolean}	True if string starts with the given prefix
+	 */
+	function stringStartsWith( str, prefix ) {
+
+		return str.indexOf(prefix) === 0;
+
+	}
+
+
+	function initCssFileCache() {
+		if ( cssFileCache == null ) {
+			cssFileCache = {};
+			jQuery("head link").each(function() {
+				var href = jQuery(this).attr("href");
+				cssFileCache[href] = true;
+			});
+		}
+	}
+
+	/**
+	 * Links given css file to the document
+	 * @memberof utils
+	 * @param cssFile	The css file that is being linked to the document
+	 */
+	function loadCSS(cssFile) {
+
+		initCssFileCache();
+
+		if ( cssFileCache[cssFile] ) {
+			return;
+		}
+
+		cssFileCache[cssFile] = true;
+
+		jQuery("<link>").appendTo("head").attr({type: "text/css", rel: "stylesheet"}).attr("href", cssFile);
+
+	}
+	
+	/**
+	 * Makes the loadCSS function ignore given css file. Use this if the css declarations are already loaded some other way.
+	 * @memberof utils
+	 * @param cssFile	The css file to be ignored.
+	 */
+	function markCSSLoaded(cssFile) {
+		initCssFileCache();
+		cssFileCache[cssFile] = true;
+	}
+
+	/** Registers an extension
+	 * @memberof utils
+	 * @param name		Name of the extension being registered
+	 * @param callback
+	 */
+	function registerExtension(name, callback) {
+
+		if ( extensions[name] ) {
+
+			extensions[name].callbacks.push(callback);
+
+			if ( extensions[name].data ) {
+				callback(extensions[name].data);
+			}
+
+		} else {
+
+			extensions[name] = {
+				callbacks: [callback]
+			};
+
+		}
+
+	}
+
+	/**
+	 * @memberof utils
+	 * @param name
+	 * @param data
+	 */
+	function extensionReady(name, data) {
+
+		if ( extensions[name] ) {
+
+			extensions[name].data = data;
+
+			jQuery.each(extensions[name].callbacks, function(index, func) {
+				func(data);
+			});
+
+		} else {
+
+			extensions[name] = {
+				callbacks: [],
+				data: data
+			};
+
+		}
+
+	}
+
+	/**
+	 * Returns a function, that, as long as it continues to be invoked, will not be triggered.
+	 * The function will be called after it stops being invoked for N milliseconds.
+	 * If 'immediate' is passed, trigger the function on the leading edge, instead of trailing.
+	 * @memberof utils
+	 * @param func			The function that is returned
+	 * @param wait
+	 * @param immediate		Is function triggered on the leading edge
+	 * @return {function}	The function that is called after it stops being invoked
+	 */
+	function debounce(func, wait, immediate) {
+		var timeout;
+		return function() {
+			var context = this, args = arguments;
+			var later = function() {
+				timeout = null;
+				if (!immediate) func.apply(context, args);
+			};
+			var callNow = immediate && !timeout;
+			clearTimeout(timeout);
+			timeout = setTimeout(later, wait);
+			if (callNow) func.apply(context, args);
+		};
+	}
+
+	/**
+	 * Loops all properties of JS -object. Property handler is called for each looped property.
+	 * @memberof utils
+	 * @param obj	JavaScript object whose properties are looped.
+	 * @param func	TThis handler is called for each property.
+	 */
+	function loopProperties(obj, func) {
+
+
+	    for (var prop in obj) {
+
+	    	// skip loop if the property is from prototype
+	        if(!obj.hasOwnProperty(prop)) continue;
+
+	        func(obj, prop);
+		}
+	}
+
+	/**
+	 * Returns an array of visible pages that are set as checked in the given table
+	 * @memberof utils
+	 * @param table
+	 */
+	function getVisibleSelectedPages(table) {
+
+		var pageIds = [];
+
+		var inputs = jQuery(table).find(".page-selected:checked");
+
+		jQuery.each(inputs, function() {
+
+			if ( jQuery(this).closest("tr").is(":visible") ) {
+				pageIds.push(jQuery(this).attr("data-tt-id"));
+			}
+
+
+		});
+
+		return pageIds;
+
+	}
+
+
+	/**
+	 * Returns translation for the wanted language based on key and languageId
+	 * @memberof utils
+	 * @param key			Key of the sentence/word that is being returned
+	 * @param languageId	Language Id
+	 * @param extraParams	Extra parameters
+	 * @return {string} 	The translated sentence/word for the wanted language based on given language Id
+	 *
+	 */
+	function getLanguageValue(key, languageId, extraParams) {
+		return Language.get(key, languageId, extraParams);
+	}
+
+	/**Generates a render url
+	 * @memberof utils
+	 * @param namespace	A portlet namespace as generated by the portlet:namespace tag
+	 * @param view		The name of the view to load
+	 * @return	A url that can be used to load the specified view*/
+	function getRenderUrl(namespace, view){
+		//Strip leading and trailing underscores
+		if (namespace.startsWith("_")){
+			namespace = namespace.substr(1);
+		}
+		if (namespace.endsWith("_")){
+			namespace = namespace.slice(0, -1);
+		}
+		//Use current location as a base
+		var url = location.href;
+		//Add portlet ID
+		url = addUrlParameter(url, "p_p_id", namespace);
+		//Lifecycle 0 == view
+		url = addUrlParameter(url, "p_p_lifecycle", 0);
+		url = addUrlParameter(url, "p_p_state", "exclusive");
+		url = addUrlParameter(url, "p_p_mode", "view");
+		//Add view identifier
+		url = addUrlParameter(url, "_" + namespace + "_view", view);
+		return url;
+	}
+
+	/**Generates an action url
+	 * @memberof utils
+	 * @param namespace	A portlet namespace as generated by the portlet:namespace tag
+	 * @param action	The name of the action
+	 * @return	A url that can be used to execute the action*/
+	function getActionUrl(namespace, action){
+		//Strip leading and trailing underscores
+		if (namespace.startsWith("_")){
+			namespace = namespace.substr(1);
+		}
+		if (namespace.endsWith("_")){
+			namespace = namespace.slice(0, -1);
+		}
+		//Use current location as a base
+		var url = location.href;
+		//Add portlet ID
+		url = addUrlParameter(url, "p_p_id", namespace);
+		//Lifecycle 1 == action
+		url = addUrlParameter(url, "p_p_lifecycle", 1);
+		url = addUrlParameter(url, "p_p_state", "exclusive");
+		url = addUrlParameter(url, "p_p_mode", "view");
+		//Add action identifier
+		url = addUrlParameter(url, "_" + namespace + "_javax.portlet.action", action);
+		//Add auth token
+		url = addUrlParameter(url, "p_auth", Liferay.authToken);
+		return url;
+	}
+
+	/**Transplants query parameters from an URL to the current URL
+	 * @memberof utils
+	 * @param url	A URL that has query parameters
+	 * @return	The current base URL with the query parameters of the specified URL*/
+	function moveParamsToCurrentUrl(url){
+		var params = url.split("?")[1];
+		return location.href.split("?")[0] + "?" + params;
+	}
+
+	/**Scrolls the page until the specified element is visible. If the element is larger than screen height, the screen will be scrolled to show the
+	 * top of the element and as much of its body as possible
+	 * @memberof utils
+	 * @param $elem	A jQuery object specifying the element to show
+	 * @param topOffset	The number of pixels to leave at the top for header bars etc. (default: 110)*/
+	function scrollElementIntoView($elem, topOffset){
+		topOffset = topOffset || 110;
+
+		//Get the top edge of the element
+		var elemTop = $elem.offset().top;
+		//Calculate position of the element's bottom edge
+    	var elemBottom = elemTop + $elem.height();
+    	//Get the top edge of the screen
+    	var screenTop = window.scrollY;
+    	//Calculate the current position of the screen's bottom edge
+    	var screenBottom = screenTop + window.innerHeight;
+
+    	//Check if the top of the screen is visible
+    	if (elemTop < screenTop + topOffset){
+    		//If not, scroll up until the element is in view
+    		$("html, body").animate({ scrollTop: elemTop - 10 - topOffset }, 250);
+    	}
+    	//Check if the bottom of the element is visible
+    	else if (elemBottom > screenBottom){
+    		var target;
+    		//If the element doesn't fit on the screen, show as much as possible
+    		if ($elem.height() > window.innerHeight){
+    			target = elemTop - 10 - topOffset;
+    		}
+    		else {
+    			//Otherwise scroll down to show the entire element
+    			target = elemBottom - window.innerHeight + 10;
+    		}
+    		//scroll the element into view
+    		$("html, body").animate({ scrollTop: target }, 250);
+    	}
+    }
+
+    /**
+     * Generates a random UUID.
+     * @memberOf utils
+     * @return {string} The generated UUID.
+     */
+	function randomUUID() {
+		return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, function(c) {
+			return (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16);
+		});
+	}
+	
+	function deepEqual(a, b){
+		if (a === b) return true;
+		if (typeof a !== typeof b) return false;
+		if (typeof a === 'object' || typeof a === 'array') {
+			var equal = true;
+			$.each(a, function(key){
+				if (!deepEqual(a[key], b[key])){
+					equal = false;
+					return false; //break
+				}
+			});
+			return equal;
+		}
+		return false;
+	}
+	
+	function deepExtend(target, source) {
+		for (var property in source) {
+			if (property in target && typeof target[property] === 'object') {
+				deepExtend(target[property], source[property]);
+			} else {
+				target[property] = source[property];
+			}
+		}
+		return target;
+	}
+
+	return {
+		get: get,
+		getHtml: getHtml,
+		post: post,
+		postWithRequestData: postWithRequestData,
+		postUntilSuccessful: postUntilSuccessful,
+		upload: upload,
+		reload: reload,
+		listeners: listeners,
+		clearListeners: clearListeners,
+		pollUntilReady: pollUntilReady,
+		editable: editable,
+		trigger: trigger,
+		putToSessionStore: putToSessionStore,
+		getFromSessionStore: getFromSessionStore,
+		clearSessionStore: clearSessionStore,
+		addUrlParameter: addUrlParameter,
+		getUrlParameter: getUrlParameter,
+		hasUrlPathPart: hasUrlPathPart,
+		removeClassesWithWildcard: removeClassesWithWildcard,
+		stringStartsWith: stringStartsWith,
+		loadCSS: loadCSS,
+		markCSSLoaded: markCSSLoaded,
+		debounce: debounce,
+		loopProperties: loopProperties,
+		getVisibleSelectedPages: getVisibleSelectedPages,
+		registerExtension: registerExtension,
+		extensionReady: extensionReady,
+		getLanguageValue: getLanguageValue,
+		isDraggingOn: isDraggingOn,
+		attachListeners: attachListeners,
+		getRenderUrl: getRenderUrl,
+		getActionUrl: getActionUrl,
+		moveParamsToCurrentUrl: moveParamsToCurrentUrl,
+		scrollElementIntoView: scrollElementIntoView,
+		randomUUID: randomUUID,
+		deepEqual: deepEqual,
+		deepExtend: deepExtend
+	};
+
+});
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/playlists', ['./utils', './material'], function(utils, material) {
+
+	/**
+	 *
+	 * Contains functions for loading and manipulating playlists.
+	 * A playlist is a named list of product pages, created by users, usually teachers.
+	 * When students view a playlist, they only see the pages in the playlist and are only
+	 * able to move back and forward in the playlist. <br><br>A 'page' in playlist can either be
+	 * an actual page of Cloubi product, file in media bank or file uploaded by the teacher.
+	 * Support for media bank and teacher uploaded files requires the Related Content API. Without
+	 * it, playlists can contain only normal pages.
+	 * <br><br>
+	 *
+	 * To use this API, load it like this:
+	 * <pre><code>
+	 * require(['fi.cloubi.frontend/playlists'], function(playlists) {
+	 * 	playlists.getPlaylists(function(lists) {
+	 * 		console.log(lists);
+	 * 	});
+	 * });
+	 * </code></pre>
+	 *
+	 * This API focuses mainly on manipulating the actual playlists. To view a playlist, coordinated
+	 * effort of this API, material.js API and the theme itself is required. It's done like this:
+	 *
+	 * <ol>
+	 * 	<li>Register a listener with <code>material.onPlaylistChange()</code> function.</li>
+	 * 	<li>Call <code>viewPlaylist(id)</code> or <code>viewPlaylistByCode(id)</code> function.</li>
+	 *  <li>Callback registered with material.onPlaylistChange will be called. Change the theme to playlist mode:
+	 *  	hide navigation and tools, show playlist title and progress indicator.</li>
+	 *  <li>To navigate the playlist, use <code>material.changeToNextPage()</code> and
+	 *  	<code>changeToPreviousPage()</code> functions. These functions should be used anyways to
+	 *  	change to next and previous page, whether in playlist mode or not.</li>
+	 *  <li>Whenever page changes (listen with material.onPageChange function), call
+	 *  	<code>getActivePlaylistStatus()</code> and update playlist progress indicator with the information returned.</li>
+	 *  <li>Close playlist mode by calling <code>closePlaylist()</code>. This will again trigger the listener
+	 *  	registed previously with <code>material.onPlaylistChange()</code>.</li>
+	 * </ol>
+	 *
+	 * So the theme must actually implement a separate playlist view mode. In this mode, normal navigation
+	 * is disabled, only the previous and next buttons are visible. Then there is some sort of playlist
+	 * progress indicator, which tells what playlist is open. Playlist mode is kinda like a separate product
+	 * with only those pages in that order.
+	 * <br><br>
+	 *
+	 * A single playlist can contain pages from multiple products, or be associated with a particular material. Students can open
+	 * playlist created by teachers (this is the whole point of playlists). If a playlist has a page that students do not have a permission
+	 * to view, that page is trimmed from the playlist when student loads it.
+	 *
+	 * @namespace playlists
+	 *
+	 **/
+
+
+
+	/* TYPE DEFINITIONS */
+
+	/**An object representing a playlist
+	 * @memberof playlists
+	 * @mixes playlists.PlaylistMeta
+	 * @typedef {Object} Playlist
+	 * @property {string} shareCode						The share code of the playlist
+	 * @property {string} shareURL						The URL to open this playlist
+	 * @property {playlists.PlaylistPage[]} pages		An array of pages in the list*/
+
+	/**A single page in a playlist
+	 * @memberof playlists
+	 * @typedef {Object} PlaylistPage
+	 * @property {string} materialId					The material ID of this playlist page
+	 * @property {string} pageId						The page ID of this playlist page
+	 * @property {string} [relatedContentId]			The related content ID of this playlist page
+	 * @property {string} [pageTitle]					Title of the page, if available is true.
+	 * @property {string} [materialTitle]				Title of the material, if available is true.
+	 * @property {string} [relatedContantTitle]			Title of the related content, if available is true.
+	 * @property {boolean} available					True, if current user still has access to this page/related content.*/
+
+
+	/**An object representing a playlist metadata.
+	 * @memberof playlists
+	 * @mixin
+	 * @typedef {Object} PlaylistMeta
+	 * @property {string} id							The ID of the playlist
+	 * @property {string} name							The name of the playlist
+	 * @property {string} description					The description of the playlist
+	 * @property {boolean} visible						If true, anyone with the code can open the playlist*/
+
+
+
+
+	/* CALLBACK DEFINITIONS */
+
+	/**A callback to receives playlists.
+	 * @memberof playlists
+	 * @callback PlaylistsCallback
+	 * @param {playlists.Playlist[]} playlists	An array containing the playlists*/
+
+	/**A callback to receive a playlist.
+	 * @memberof playlists
+	 * @callback PlaylistCallback
+	 * @param {playlists.Playlist} playlist		The playlist or null if no such playlist exists.*/
+
+	/**A callback to receive information about playlist deletion.
+	 * @memberof playlists
+	 * @callback DeleteCallback
+	 * @param {boolean} success					True, if the playlist was successfully deleted.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist'</ul>*/
+
+	/**A callback to receive information about playlist update.
+	 * @memberof playlists
+	 * @callback UpdateCallback
+	 * @param {boolean} success					True, if the playlist was successfully updated.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'cannot-associate-playlist-with-material'</ul>*/
+
+	/**A callback to receive information about playlist creation.
+	 * @memberof playlists
+	 * @callback CreateCallback
+	 * @param {boolean} success					True, if the playlist was successfully created.
+	 * @param {playlists.Playlist} [playlist]	The just created playlist.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'no-permission-to-create-playlist' <li>'failed-to-create-playlist'</ul>*/
+
+	/**A callback to receive information about adding page to a playlist.
+	 * @memberof playlists
+	 * @callback AddCallback
+	 * @param {boolean} success					True, if the page was successfully added.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-already-in-playlist' <li>'invalid-page' <li>'page-from-unassociated-material'</ul>*/
+
+	/**A callback to receive information about removing page from a playlist.
+	 * @memberof playlists
+	 * @callback RemoveCallback
+	 * @param {boolean} success					True, if the page was successfully removed.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-not-in-playlist' <li>'invalid-page'</ul>*/
+
+	/**A callback to receive information about moving a page in a playlist.
+	 * @memberof playlists
+	 * @callback SortCallback
+	 * @param {boolean} success					True, if the page was successfully moved.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-not-in-playlist' <li>'invalid-page'</ul>*/
+
+	/**A callback to be called when playlist is in view mode.
+	 * @memberof playlists
+	 * @callback ViewCallback
+	 * @param success							True of the playlist was successfully opened, false otherwise*/
+
+	/**A callback to get the playlist status.
+	 * @memberof playlists
+	 * @callback StatusCallback
+	 * @param {boolean} hasPlaylist						True, if there is an active playlist.
+	 * @param {playlists.PlaylistMeta} [playlist]		Metadata of the current playlist.
+	 * @param {number} [pageIndex]						Index of the current page in playlist. Zero means the first page.
+	 * @param {number} [pagesTotal]						Number of the pages in current playlist.
+	 * */
+
+	/**A callback to be called when playlist is closed.
+	 * @memberof playlists
+	 * @callback CloseCallback*/
+
+
+
+	/* FUNCTION IMPLEMENTATIONS */
+
+
+	/**
+	 * Get all the playlist created by current user.
+	 * @memberof playlists
+	 * @param {playlists.PlaylistsCallback} callback			A callback to receive the playlists.
+	 */
+	function getPlaylists(callback) {
+		utils.get('/o/playlists/playlists', function(response) {
+			callback(response.playlists);
+		});
+	}
+
+	/**
+	 * Get all playlists associated with the given material id.
+	 * @memberof playlists
+	 * @param {number}                     materialId           The ID of a Cloubi material.
+	 * @param {playlists.PlaylistCallback} callback             A callback to receive the playlists.
+	 */
+	function getPlaylistsForMaterial(materialId, callback) {
+		utils.get('/o/playlists/playlists?materialId=' + materialId, function(response) {
+			callback(response.playlists);
+		});
+	}
+
+	/**
+	 * Get a playlist with given id.
+	 * @memberof playlists
+	 * @param {string} playlistId								The ID of the playlist
+	 * @param {playlists.PlaylistCallback} callback				A callback to receive the playlist.
+	 */
+	function getPlaylist(playlistId, callback) {
+		doGetPlaylist(playlistId, null, false, callback);
+	}
+
+
+	/**
+	 * Get a playlist with given share code.
+	 * @memberof playlists
+	 * @param {string} code										The share code of the playlist
+	 * @param {playlists.PlaylistCallback} callback				A callback to receive the playlist.
+	 */
+	function getPlaylistByCode(code, callback) {
+		doGetPlaylist(null, code, false, callback);
+	}
+
+
+	function doGetPlaylist(playlistId, code, trimPages, callback) {
+		var data = { trim: trimPages };
+		if ( playlistId ) {
+			data.id = playlistId;
+		}
+		if ( code ) {
+			data.code = code;
+		}
+		utils.post('/o/playlists/playlist', data, function(response) {
+			callback(response.playlist ? response.playlist : null);
+		});
+	}
+
+
+
+	/**
+	 * Checks is current user is allowed to create and modify playlists. All users can
+	 * view playlists, but usually only teachers are allowed to create them.
+	 * @memberof playlists
+	 * @return {boolean}										True, if current user can create new playlists.
+	 */
+	function isAllowedToCreatePlaylists() {
+		return Cloubi.playlists.canCreatePlaylists;
+	}
+
+
+	/**
+	 * Deletes a playlist with given id.
+	 * @memberof playlists
+	 * @param {string} playlistId								The ID of the playlist to delete.
+	 * @param {playlists.DeleteCallback} callback				A callback to be called when operation is completed.
+	 */
+	function deletePlaylist(playlistId, callback) {
+		utils.post('/o/playlists/delete', {id: playlistId}, function(response) {
+			callback(response.success);
+		});
+	}
+
+
+	/**
+	 * Updates metadata of a playlist with given id.
+	 * @memberof playlists
+	 * @param {string} playlistId								The ID of the playlist to update.
+	 * @param {playlists.PlaylistMeta} data						The new metadata. The id attribute is ignored and
+	 * 															missing attributes are not updated.
+	 * @param {playlists.UpdateCallback} callback				A callback to be called when operation is completed.
+	 */
+	function updatePlaylist(playlistId, data, callback) {
+		utils.post('/o/playlists/update', {id: playlistId, data: data}, function(response) {
+			callback(response.success);
+		});
+	}
+
+
+	/**
+	 * Creates a new, empty playlist.
+	 * @memberof playlists
+	 * @param {playlists.PlaylistMeta} data						The metadata for the new playlist. The id attribute is ignored.
+	 * @param {playlists.CreateCallback} callback				A callback to be called when operation is completed.
+	 */
+	function createPlaylist(data, callback) {
+		utils.post('/o/playlists/create', data, function(response) {
+			callback(response.success, response.playlist);
+		});
+	}
+
+
+
+	/**
+	 * Adds a page to the end of existing playlist. If the page already exists in the playlist,
+	 * this function does nothing.
+	 * @memberof playlists
+	 * @param {playlists.PlaylistPage} page						The page to be added.
+	 * @param {string} playlistId								The ID of the playlist to add the page to.
+	 * @param {playlists.AddCallback} callback					A callback to be called when operation is completed.
+	 */
+	function addToPlaylist(page, playlistId, callback) {
+		utils.post('/o/playlists/add', {id: playlistId, page: page}, function(response) {
+			callback(response.success);
+		});
+	}
+
+
+	/**
+	 * Adds the current page to the end of existing playlist. If the page already exists in the playlist,
+	 * this function does nothing.
+	 * @memberof playlists
+	 * @param {string} playlistId								The ID of the playlist to add the page to.
+	 * @param {playlists.AddCallback} callback					A callback to be called when operation is completed.
+	 */
+	function addCurrentPageToPlaylist(playlistId, callback) {
+		addToPlaylist({
+			materialId: material.getCurrentMaterialId(),
+			pageId: material.getCurrentPageId()
+		}, playlistId, callback);
+	}
+
+
+
+	/**
+	 * Removes a page from existing playlist. If the page does not exists in the playlist,
+	 * this function does nothing.
+	 * @memberof playlists
+	 * @param {playlists.PlaylistPage} page						The page to be removed. This must be a page object from a playlist returned by this API.
+	 * @param {string} playlistId								The ID of the playlist to remove the page from.
+	 * @param {playlists.RemoveCallback} callback				A callback to be called when operation is completed.
+	 */
+	function removeFromPlaylist(page, playlistId, callback) {
+		utils.post('/o/playlists/remove', {id: playlistId, page: page}, function(response) {
+			callback(response.success);
+		});
+	}
+
+
+	/**
+	 * Moves a page to a new location within a playlist.
+	 * @memberof playlists
+	 * @param {playlists.PlaylistPage} page						The page to be moved. This must be a page object from a playlist returned by this API.
+	 * @param {number} index									New location, or index, for the page. Zero means the first page of the playlist.
+	 * @param {string} playlistId								The ID of the playlist.
+	 * @param {playlists.SortCallback} callback					A callback to be called when operation is completed.
+	 */
+	function sortPlaylistItem(page, index, playlistId, callback) {
+		utils.post('/o/playlists/sort', {id: playlistId, index: index, page: page}, function(response) {
+			callback(response.success);
+		});
+	}
+
+
+	/**
+	 * Opens a playlist for viewing.
+	 * @memberof playlists
+	 * @param {string} playlistId								The ID of the playlist.
+	 * @param {playlists.ViewCallback} callback					A callback to be called when playlist view mode is open.
+	 * 															Listeners registered with <code>material.onPlaylistChange()</code>
+	 * 															will be called before this.
+	 * @param {?integer} pageNumber								The number of the page to start from
+	 */
+	function viewPlaylist(playlistId, callback, pageNumber) {
+		doGetPlaylist(playlistId, null, true, function(playlist) {
+			if ( playlist ) {
+				material.setCurrentPlaylist(playlist, pageNumber);
+				callback(true);
+			}
+			else {
+				callback(false);
+			}
+		});
+	}
+
+
+	/**
+	 * Opens a playlist for viewing.
+	 * @memberof playlists
+	 * @param {string} code										The share code of the playlist
+	 * @param {playlists.ViewCallback} callback					A callback to be called when playlist view mode is open.
+	 * 															Listeners registered with <code>material.onPlaylistChange()</code>
+	 * 															will be called before this.
+	 */
+	function viewPlaylistByCode(code, callback) {
+		doGetPlaylist(null, code, true, function(playlist) {
+			if ( playlist ) {
+				material.setCurrentPlaylist(playlist);
+				callback(true);
+			}
+			else {
+				callback(false);
+			}
+		});
+	}
+
+
+	/**
+	 * Gets information about current playlist, if there is one.
+	 * @memberof playlists
+	 * @param {playlists.StatusCallback} callback					A callback to receive the status information.
+	 */
+	function getActivePlaylistStatus(callback) {
+		var current = material.getCurrentPlaylist();
+		if ( current ) {
+			var pageSource = material.getPageSource();
+			callback(true, current, pageSource.getCurrentPageIndex(), current.pages.length);
+		} else {
+			callback(false);
+		}
+	}
+
+
+	/**
+	 * Closes currently open playlist, if there is one.
+	 * @memberof playlists
+	 * @param {playlists.CloseCallback} callback					A callback to be called when playlist is closed.
+	 * 																Listeners registered with <code>material.onPlaylistChange()</code>
+	 * 																will be called before this.
+	 */
+	function closePlaylist(callback) {
+		material.setCurrentPlaylist(null);
+		callback();
+	}
+
+
+	/**
+	 * Open playlist automatically if user opened /o/open-playlist/<id> URL.
+	 */
+	material.onMaterialReady(function() {
+
+		// Do we have a playlist to automatically open?
+		if ( Cloubi.playlists.playlistId ) {
+
+			// This should prevent the playlist from being opened twice or something..
+			var id = Cloubi.playlists.playlistId;
+			Cloubi.playlists.playlistId = null;
+
+			var pageNum = Cloubi.playlists.playlistPage;
+
+			// Check if the playlist portlet is also on the page,
+			// as it will also try to automatically open the playlist.
+			if ( jQuery('#portlet_fi_cloubi_portlet_playlist_PlaylistPortlet').length == 0 ) {
+				viewPlaylist(id, function() {}, pageNum);
+			}
+
+		}
+
+	});
+
+
+	/* PUBLIC FUNCTIONS */
+
+	return {
+		getPlaylists: getPlaylists,
+		getPlaylistsForMaterial: getPlaylistsForMaterial,
+		getPlaylist: getPlaylist,
+		getPlaylistByCode: getPlaylistByCode,
+		isAllowedToCreatePlaylists: isAllowedToCreatePlaylists,
+		deletePlaylist: deletePlaylist,
+		updatePlaylist: updatePlaylist,
+		createPlaylist: createPlaylist,
+		addToPlaylist: addToPlaylist,
+		addCurrentPageToPlaylist: addCurrentPageToPlaylist,
+		removeFromPlaylist: removeFromPlaylist,
+		sortPlaylistItem: sortPlaylistItem,
+		viewPlaylist: viewPlaylist,
+		viewPlaylistByCode: viewPlaylistByCode,
+		getActivePlaylistStatus: getActivePlaylistStatus,
+		closePlaylist: closePlaylist
+	};
+
+});
+
+
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/user-accounts', ['./utils'], function(utils) {
+
+	/**
+	 Contains functions for creating new user accounts, logging in, logging out and updating current user's details.
 	 <br><br>
-	 These function are intended to be used within materials. If used outside materials, make sure to always manually provide material IDs.
+	 These function are intended to be used within the materials. For example, students could first start using a material 
+	 anonymously, i.e. without logging in, and then at later time register a new Cloubi user account so he/she can continue later.
 	 <br><br>
 	 
 	 To use this API, load it like this:
 	 
 	 <pre><code>
-	require(['fi.cloubi.frontend/gamification'], function(gamification) {
-		gamification.isEnabled().then( function(enabled) {
-			if (enabled) console.log("Gamification is enabled");
-			else console.log("Gamification is disabled");
-		});
+require(['fi.cloubi.frontend/account'], function(accounts) {
+	accounts.getUserInfo(function(info) {
+		console.log(info);
 	});
+});
 	 </code></pre>
 	 
-	 * @namespace gamification */
+	 * @namespace accounts */
 	
-	/**An array of errors encountered while executing a request.
-	 * All gamification functions except isEnabled will return the error "no-such-realm" if the function is called for a material
-	 * that does not have gamification features enabled.
-	 * @memberof gamification
-	 * @typedef {Array} Error*/
+	/**A callback for functions that will produce an UserInfo object.
+	 * @memberof accounts
+	 * @callback userInfoCallback
+	 * @param {?accounts.UserInfo} info		Information about current account or null if user is not logged in.*/
 	
-	/**Represents an achievement that the player can level up by meeting certain criteria.
-	 * @memberof gamification
-	 * @typedef {Object} Achievement
-	 * @property {string} id									The ID of this achievement
-	 * @property {string} title 								The name of this achievement
-	 * @property {string} description							The description of this achievement
-	 * @property {string} [group]								The name of the achievement group this achievement belongs to (if any)
-	 * @property {number} level									The user's current level number in this achievement. 
-	 * 															Level 0 means that the achievement has not yet been unlocked.
-	 * @property {gamification.AchievementLevel} currentLevel	The data of the user's current level in this achievement.
-	 * @property {gamification.AchievementLevel} [nextLevel]	The data of the user's next level in this achievement, if any.*/
+	/**A callback that will receive information about login attempt.
+	 * @memberof accounts
+	 * @callback loginCallback
+	 * @param {boolean} success					True, if the login attempt was successful. False, if user account does not exists or password is invalid.
+	 * 											For security reasons, missing account and wrong password produce the same error.
+	 */
 	
-	/**Represents a single level in an achievement. Each level must be unlocked separately and has its own unlock criteria.
-	 * @memberof gamification
-	 * @typedef {Object} AchievementLevel
-	 * @property {string} title			The name of this level
-	 * @property {string} description	The description of this level
-	 * @property {string} awardText		Text that should be shown to the user when this level is unlocked
-	 * @property {string} [badgeImage]	A download URL for a small image representing this level
-	 * @property {string} [largeImage]	A download URL for a large image representing this level*/
+	/**A callback that will be called after user has logged out.
+	 * @memberof accounts
+	 * @callback logoutCallback*/
 	
-	/**An avatar that the player may select to represent themselves.
-	 * @memberof gamification
-	 * @typedef {Object} Avatar
-	 * @property {string} id			The ID of this avatar
-	 * @property {string} name			The default name of this avatar
-	 * @property {string} description	A description of this avatar
-	 * @property {string} [largeImage]	A download URL for a large image representing this avatar
-	 * @property {string} [markerImage]	A download URL for a small image representing this avatar*/
+	/**A callback that will receive information about user account update attempt.
+	 * @memberof accounts
+	 * @callback updateUserCallback
+	 * @param {boolean} success					True, if the login attempt was successful.
+	 * @param {Array.<string>} errors			If <code>success</code> is false, this array contains one or more of the following
+	  											error conditions: 'invalid-email', 'duplicate-email', 'first-name-empty', 'last-name-empty',
+	 											'invalid-password', 'passwords-do-not-match', 'too-short-password', 'too-trivial-password',
+	 											'edit-accounts-not-enabled', 'duplicate-username'.
+	 */
 	
-	/**Contains the status of the current user
-	 * @memberof gamification
-	 * @typedef {Object} Player
-	 * @param {string} name					The player's name
-	 * @param {boolean} hasAvatar			True if the player has chosen an avatar
-	 * @property {string} [largeImage]		A download URL for a large image representing the player's avatar
-	 * @property {string} [markerImage]		A download URL for a small image representing the player's  avatar
-	 * @property {Array<String>} overlays	An array of download URLs to images that should be drawn over the player's avatar*/
+	/**A callback that will receive information about user account creation.
+	 * @memberof accounts
+	 * @callback registerUserCallback
+	 * @param {boolean} success					True, if the new user account was successfully created and user logged in. If false, possible
+	 											current user was not logged out.
+	 * @param {Array.<string>} errors			If <code>success</code> is false, this array contains one or more of the following
+	  											error conditions: 'invalid-email', 'duplicate-email', 'first-name-empty', 'last-name-empty',
+	 											'passwords-do-not-match', 'too-short-password', 'too-trivial-password', 'signup-not-enabled',
+	 											'duplicate-username'.
+	 */
+	
+	/**A callback that will called after a password reset link has been sent.
+	 * @memberof accounts
+	 * @callback resetLinkCallback
+	 */
 	
 	
-	var BASE_URL="/o/gamification/";	
-	var PARAM_MATERIAL = "materialId";
 	
-	var enabledMaterials = {};
 	
-	/**Checks whether gamification features have been enabled for the specified product
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material to check
-	 * @return {Promise<boolean, gamification.Error>}	Resolves to true if gamification is enabled, false otherwise*/
-	function isEnabled(materialId){
-		var cacheKey = materialId || material.getCurrentMaterialId();
-		if ( enabledMaterials[cacheKey] ) {
-			return enabledMaterials[cacheKey]; 
+	/**An object representing the user account for logged in user. Some attributes are only used when updating the user account,
+	 * like password and newPassword. Some attributes cannot be updated, like the id. It depends on the server's configuration
+	 * wheter or not the email address can be changed.
+	 * @memberof accounts
+	 * @typedef {Object} UserInfo
+	 * @property {?string} id					The user ID.
+	 * @property {?string} firstName			First name of the user.
+	 * @property {?string} lastName				Last name of the user.
+	 * @property {?string} username				The username of the user.
+	 * @property {?string} email				Email address of the user.
+	 * @property {?string} password				User's current password.
+	 * @property {?string} newPassword			New password for the user.
+	 * @property {?string} newPasswordAgain		New password again.
+	 */
+	
+	
+	/**An object representing the global configuration of user accounts, such as wheter is possible to create new accounts or not.
+	 * @memberof accounts
+	 * @typedef {Object} Configuration
+	 * @property {boolean} signup				True, if its possible to create new accounts.
+	 * @property {boolean} editAccounts			True, if its possible to edit existing accounts.
+	 * @property {boolean} emailLogin			True, if login should be done with email address instead of username.
+	 */
+	
+	
+	
+	// This variable is used to hold transient information about user's state (logged in or not)
+	// after logIn, logOut or registerUser has been called. Before calling those functions,
+	// this variable must be null.
+	var loggedInState = null;
+	
+	
+	
+	/**Gets the current global configuration for user accounts.
+	 * @memberof accounts
+	 * @return {accounts.Configuration} The configuration.*/
+	function getConfiguration() {
+		return {
+			signup: Cloubi.userAccountConfig.signup,
+			editAccounts: Cloubi.userAccountConfig.editAccounts,
+			emailLogin: Cloubi.userAccountConfig.emailLogin
+		};
+	}
+	
+	
+	/**Gets information about currently logged in user, if there is one. 
+	 * @memberof accounts
+	 * @param {accounts.userInfoCallback} callback		A callback function that receives the user account info.*/
+	function getUserInfo(callback) {
+		if ( loggedInState ) {
+			callback(loggedInState.user);
 		} else {
-			var promise = _postWithPromise("enabled", materialId, {}, function(d, result) {
-				if (result.enabled){
-					d.resolve(true);
-				}
-				else {
-					d.resolve(false);
-				}
-			});
-			enabledMaterials[cacheKey] = promise;
-			return promise;
+			if ( themeDisplay.isSignedIn() ) {
+				callback({
+					id: Cloubi.currentUser.userId,
+					firstName: Cloubi.currentUser.firstName,
+					lastName: Cloubi.currentUser.lastName,
+					email: Cloubi.currentUser.email,
+					username: Cloubi.currentUser.screenName,
+				});
+			} else {
+				callback(null);
+			}
 		}
 	}
 	
-	/**Loads all achievements that are currently visible to the player in the specified material
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of achievements in the current material*/
-	function getAchievements(materialId){
-		return _doGetAchievements("achievements", materialId);
+	/**Checks if there is a logged in user. 
+	 * If there is, then the <code>getUserInfo()</code> function will provide a non-null UserInfo object. 
+	 * @memberof accounts
+	 * @return {boolean} True, if there is a logged in user.*/
+	function isLoggedIn() {
+		if ( loggedInState ) {
+			return loggedInState.loggedIn;
+		} else {
+			return themeDisplay.isSignedIn();
+		}
 	}
 	
-	/**Loads all achievements that the player has unlocked but have not yet been marked as shown. Note that this does not perform checks to see
-	 * if any new achievements have been unlocked, use {@link gamification.checkAchievements} to also check for new achievements.
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of pending achievements*/
-	function getPendingAchievements(materialId){
-		return _doGetAchievements("pending-achievements", materialId);
-	}
-	
-	/**Checks if any new achievements have been unlocked and then loads all achievements that the player has unlocked but have not yet been 
-	 * marked as shown. To load pending achievements without checking for new ones, use {@link gamification.getPendingAchievements}
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of pending achievements*/
-	function checkAchievements(materialId){
-		return _doGetAchievements("check-achievements", materialId);
-	}
-	
-	/**Common handler for functions that return achievements*/
-	function _doGetAchievements(action, materialId){
-		return _postAndHandleSuccess(action, materialId, {}, "achievements");
-	}
-	
-	/**Marks achievements as notified, so that they will no longer appear in the user's list of pending achievements
-	 * @memberof gamification
-	 * @param {Array<String>} achievements				An array of achievement IDs
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<undefined, gamification.Error>}	Resolves when the request has been executed*/
-	function markAchievements(achievements, materialId){
-		return _postAndHandleSuccess("mark-achievements", materialId, {achievements: achievements});
-	}
-	
-	/**Loads all avatars in the specified material
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<Array<gamification.Avatar>, gamification.Error>}	Resolves to an array of avatars in the current material*/
-	function getAvatars(materialId){
-		return _postAndHandleSuccess("avatars", materialId, {}, "avatars");
-	}
-	
-	/**Gets current player status in the specified material
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<gamification.Player, gamification.Error>}	Resolves to the current player status*/
-	function getPlayerStatus(materialId){
-		return _postAndHandleSuccess("player-status", materialId, {}, "player");
-	}
-	
-	/**Sets the player's avatar in the specified material
-	 * @memberof gamification
-	 * @param {string} name								The name that the player has chosen
-	 * @param {string} avatarId							The ID of avatar that the player has chosen
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<undefined, gamification.Error>}	Resolves when the request has been executed*/
-	function setAvatar(name, avatarId, materialId){
-		return _postAndHandleSuccess("set-avatar", materialId, {name: name, avatar: avatarId});
-	}
-	
-	/**Posts an action, resolves the promise with a specified result field or rejects with any errors from the server
-	 * @param resultFieldName	The name of the field in the result object that should be used to resolve the promise*/
-	function _postAndHandleSuccess(action, materialId, data, resultFieldName){
-		return _postWithPromise(action, materialId, data, function(d, result) {
-			if (result.success){
-				if (resultFieldName){
-					d.resolve(result[resultFieldName]);
+	/**Logins user with provided email address/username and password. If the user is already logged in with another user account,
+	 * then he/she will be first logged out. If the user has already logged in with this account, then this function does nothing.
+	 * Only email address or username can be used, depending on the configuration. See <code>getConfiguration</code>.
+	 * A callback will be called after the user has either successfully logged in or there is an error, like incorrect password.
+	 * It is highly recommended to reload the page after successful login, as rest of the page will be in invalid state.
+	 * @memberof accounts
+	 * @param email {string}						The email address of the user, or null if not used.
+	 * @param username {string}						The username of the user, or null if not used. 
+	 * @param password {string}						The password of the user.
+	 * @param callback {accounts.loginCallback}		A callback function for when the login attempt is completed.
+	 */
+	function logIn(email, username, password, callback) {
+		var loginData = null;
+		if ( getConfiguration().emailLogin ) {
+			if ( email ) {
+				loginData = { email: email, password: password };
+			}
+		} else {
+			if ( username ) {
+				loginData = { username: username, password: password };
+			}
+		}
+		if ( loginData ) {
+			utils.post('/o/user-accounts/sign-in', loginData, function(data) {
+				if (data.success) {
+					loggedInState = { loggedIn: true, user: data.user };
 				}
-				else {
-					d.resolve();
-				}
+				callback(data.success);
+			});
+		} else {
+			callback(false);
+		}
+	}
+	
+	/**Logs out current user. 
+	 * @memberof accounts
+	 * @param callback {accounts.logoutCallback}	A callback function for when the user has logged out. If the user has already logged out, this
+	 												will be called immediately.
+	   @param stayOnPage {boolean}					If true, the browser will stay on the current page and the callback will be triggered after the user has been logged out. 
+	   												Otherwise it will be immediately redirected to the default logout location*/
+	function logOut(callback, stayOnPage) {
+		if ( themeDisplay.isSignedIn() ) {
+			if (stayOnPage) {
+				utils.getHtml('/c/portal/logout', function() {
+					loggedInState = { loggedIn: false, user: null };
+					callback();
+				});
 			}
 			else {
-				d.reject(result.errors);
+				window.open('/c/portal/logout', '_self');
 			}
+		} else {
+			callback();
+		}
+	}
+	
+	/**Updates current user's account, like changes the first name or password. 
+	 * @memberof accounts
+	 * @param info {accounts.UserInfo}					The settings to change. Only include the attributes you wish to update. To change the password, you
+	  													must include password, newPassword and newPasswordAgain. Must not contain id attribute.
+	 * @param callback {accounts.updateUserCallback}	A callback function for when the update is completed.
+	 */
+	function updateUser(info, callback) {
+		utils.post('/o/user-accounts/update-account', info, function(data) {
+			callback(data.success, data.errors);
 		});
 	}
 	
-	/**Posts an AJAX call to the gamification endpoint and returns a promise
-	 * @param action		The name of the action that should be invoked
-	 * @param materialId	The material ID to send (default: current material ID)
-	 * @param data			The data to send
-	 * @param processor		A callback function to process the response. Receives the Deferred object of the promise as well as the server response
-	 * 						as parameters and should either reject or resolve the Deferred based on the response data.*/
-	function _postWithPromise(action, materialId, data, processor){
-		var deferred = new $.Deferred();
-		data[PARAM_MATERIAL] = materialId || material.getCurrentMaterialId();
-		utils.post(BASE_URL + action, data, function(result){
-			processor(deferred, result);
-		},
-		function(error){
-			deferred.reject([error]);
-		})
-		return deferred.promise();
+	/**Creates new user's account, and if successful, logins that new user. It is highly recommended to reload the page after successful 
+	 * login, as rest of the page will be in invalid state.
+	 * @memberof accounts
+	 * @param info {accounts.UserInfo}					Settings for the new user account. Must not contain id or password attributes. 
+	 													Must contain newPassword, newPasswordAgain, firstName, and lastName attributes.
+	 													If login by email is enabled, must contains email attribute, otherwise must contain
+	 										 			username attribute.
+	 * @param callback {accounts.registerUserCallback}	A callback function for when the registration is completed.*/
+	function registerUser(info, callback) {
+		utils.post('/o/user-accounts/create-account', info, function(data) {
+			if (data.success) {
+				loggedInState = { loggedIn: true, user: data.user };
+			}
+			callback(data.success, data.errors);
+		});
 	}
+	
+	
+	/**Requests a password reset link to be sent to given email address.
+	 * @memberof accounts
+	 * @param email {string}							The email address to send the reset link. 
+	 * @param callback {accounts.resetLinkCallback}		A callback function for when the link has been sent.*/
+	function passwordRecovery(email, callback) {
+		utils.post('/o/user-accounts/password-recovery', {
+			email: email, lang: Cloubi.currentUser.languageId
+		}, function(data) {
+			callback();
+		});
+	} 
+	
 	
 	return {
-		isEnabled: isEnabled,
-		getAchievements: getAchievements,
-		getPendingAchievements: getPendingAchievements,
-		checkAchievements: checkAchievements,
-		markAchievements: markAchievements,
-		getAvatars: getAvatars,
-		getPlayerStatus: getPlayerStatus,
-		setAvatar: setAvatar
-	}
-	
+		getConfiguration: getConfiguration,
+		getUserInfo: getUserInfo,
+		isLoggedIn: isLoggedIn,
+		logIn: logIn,
+		logOut: logOut,
+		updateUser: updateUser,
+		registerUser: registerUser,
+		passwordRecovery: passwordRecovery
+	};
+
 });
 
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/notes', ['./utils', './material'], function(utils, material) {
+
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/additional-content', ['./utils', './material'], function(utils, material) {
 	
-	/**
-	 Contains functions for loading and manipulating user notes.
-	 <br><br>
-	 These function are intended to be used within materials. If used outside materials, make sure to always manually provide material and page IDs
-	 <br><br>
-	 
-	 To use this API, load it like this:
+	/**Contains functions for listing and accessing additional content for material pages. To use this API, load it like this:
 	 
 	 <pre><code>
-	require(['fi.cloubi.frontend/notes'], function(notes) {
-		notes.getNotesForPage(function(response) {
+	require(['fi.cloubi.frontend/additional-content'], function(ac) {
+		ac.getContents(function(response) {
 			console.log(response);
 		});
 	});
 	 </code></pre>
 	 
-	 * @namespace notes */
-	
-	/**Represents a single note object. Topic, data, material and page are only included if the note was requested with includeExtra = true.
-	 * @memberof notes
-	 * @typedef {Object} Note
-	 * @property {string} id			The unique ID of the note
-	 * @property {string} time			A human-readable string describing when the note was last modified
-	 * @property {string} text			The text content of the note
-	 * @property {string} [topic]		The topic of the note
-	 * @property {Object} [data]		Extra JSON data stored with the note
-	 * @property {Number} [material]	The ID of the material containing the note
-	 * @property {string] [page]		The ID of the page containing the note*/
-	
-	/**Represents an error encountered during processing. Possible values:
-	 * <ul>
-	 * <li><b>no-type-specified</b> A note type parameter was required but not specified</li>
-	 * <li><b>no-material-specified</b> A material ID parameter was required but not specified</li>
-	 * <li><b>no-page-specified</b> A page ID parameter was required but not specified</li>
-	 * <li><b>no-id-specified</b> A note ID parameter was required but not specified</li>
-	 * <li><b>no-such-note</b> The specified note was not found</li>
-	 * <li><b>not-owner</b> The request tried to modify a note that does not belong to the current user</li>
-	 * <li><b>no-such-material</b> The request referenced a material that does not exist</li>
-	 * <li><b>no-material-access</b> The request referenced a material that the user is not allowed to access</li>
-	 * <li><b>no-such-page</b> The request referenced a material page that does not exist</li>
-	 * <li><b>type-not-readable</b> Notes of the specified type cannot be accessed through this API</li>
-	 * <li><b>type-not-modifiable</b> Notes of the specified type cannot be added, modified or deleted through this API</li>
-	 * </ul>
-	 * @memberof notes
-	 * @typedef {string} Error*/
-	
-	/**A callback that receives an array of notes.
-	 * @memberof notes
-	 * @callback NotesCallback
-	 * @param {Object} resp					The response from the server
-	 * @param {notes.Note[]} [resp.notes]	The requested notes, if there were no errors with the request
-	 * @param {notes.Error[]} resp.errors	An array containing any errors encountered during the request*/
-	
-	/**A callback that receives note counts.
-	 * @memberof notes
-	 * @callback CountsCallback
-	 * @param {Object} resp					The response from the server
-	 * @param {Object} [resp.counts]		An object that maps page IDs to the number of notes on that page
-	 * @param {number} [resp.total]			The total number of notes in the material
-	 * @param {notes.Error[]} resp.errors	An array containing any errors encountered during the request*/
-	
-	/**A callback that receives the info of a newly created note.
-	 * @memberof notes
-	 * @callback NewNoteCallback
-	 * @param {Object} resp					The response from the server
-	 * @param {string} [resp.id]			The ID of the new note
-	 * @param {string} [resp.time]			A human-readable string describing when the note was last modified
-	 * @param {notes.Error[]} resp.errors	An array containing any errors encountered during the request*/
+	 Usage:<br><br>
+	 Calling getContents() will return a response with several objects: a files object with all the {@link additionalcontent.Content} files
+	 on the page and two content folders (generally displayed as tabs). Each folder has a list of file IDs inside that folder - these are the
+	 contents that should be displayed when that folder/tab is selected. Each file may be a folder containing files itself, in which case the
+	 IDs are included in that file's additionalContent array. Note that these references may be cyclical (a file may indirectly contain itself),
+	 so the entire folder structure should never be displayed at once.<br>
+	 Files with the popupRenderable flag set to true can be loaded inline into Cloubi by loading the file's contentUrl and inserting the response
+	 HTML into the DOM. Note that when doing this, any script tags in the response MUST be preserved and executed, such as when using jQuery.load().
+	 If a file has a contentUrl but it is not popupRenderable, the contentUrl should be treated as an external link that should be opened 
+	 in a new tab when the file is opened. If a file has the downloadable flag set to true, it can be downloaded by calling getDownloadLink()
+	 with its ID and then opening the response URL as a download link.
+	 <br><br>
 	 
-	 /**A callback invoked after a note has been modified
-	 * @memberof notes
-	 * @callback NoteModifiedCallback
-	 * @param {Object} resp					The response from the server
-	 * @param {notes.Error[]} resp.errors	An array containing any errors encountered during the request*/
+	 Playlist integration:<br><br>
+	 When the page has loaded, any additional content UI should check if Cloubi.additionalContent.initialContent exists and if so,
+	 attempt to display that content. Note that the content may be some other user's user content that is not included in the list of
+	 all contents received from getContents(), in which case it must be loaded separately with getSingleContent().
+	 <br><br>
+	 To get notified when a playlist changes to an additional content item, listen to page changes like this:
+	 <pre><code>
+	 material.onPageChange(function (page, options, data){
+		//If the page change data has a related content ID, show the related content with that ID
+		if (data.relatedContentId){
+			ac.getSingleContent(data.relatedContentId, data.playlistId, function(response){
+				if (response.success){
+					var contentData = response.files[data.relatedContentId];
+					//Display the content represented by contentData here
+				}
+			});
+		}
+	 });
+	 </code></pre>
+	 
+	 * @namespace additionalcontent */
 	
-	/**A callback that receives a material page ID
-	 * @memberof notes
-	 * @callback PageIDCallback
-	 * @param {string} [pageId]	The page ID or undefined if the page ID is not available*/
+	/**Represents an individual piece of additional content
+	 * @memberof additionalcontent
+	 * @typedef {Object} Content
+	 * @property {string[]} additionalContent	An array containing the IDs of any sub-content nested inside this content
+	 * @property {string} contentType			The MIME content type of this content
+	 * @property {string} [contentUrl]			An URL that can be loaded to render the file contents of this content inside Cloubi
+	 * @property {string} description			The description of the content
+	 * @property {boolean} editable				If true, the user can edit the title of this file
+	 * @property {string} id					The unique ID of this content
+	 * @property {boolean} playlistEnabled		If true, the user can add this content to a playlist
+	 * @property {boolean} popupRenderable		True if this content can be rendered by loading the content URL in a modal dialog
+	 * @property {string} title					The name of this file
+	 * @property {string} typeName				The human-readable name of this file's data type
+	 * @property {boolean} downloadable			If true, this content can be downloaded by getting the download URL with {@link additionalcontent.getDownloadLink}*/
 	
-	/**
-	 * A callback that receives a note changed event
-	 * @memberof notes
-	 * @callback NoteChangedCallback
-	 * @param {int} noteChangedEventType Whether the note was 1 created, 2 updated, 3 deleted.
-	 * @param {string} noteId The note's ID.
-	 * @param {Object} payload The note's updated data.
-	 */
+	/**Represents a root content folder
+	 * @memberof additionalcontent
+	 * @typedef {Object} ContentFolder
+	 * @property {string[]} additionalContent	An array containing the IDs of any content contained inside this folder
+	 * @property {boolean} canAdd				True if the user can upload files into this content folder
+	 * @property {number} [maxSize]				The maximum size of files (in bytes) that can be uploaded into this folder if 
+	 * 											this folder supports uploading*/
 	
-	/**Request parameter name for note ID*/
-	var PARAM_ID = "id";
-	/**Request parameter name for note type*/
-	var PARAM_TYPE = "type";
-	/**Request parameter name for material ID*/
-	var PARAM_MATERIAL = "material";
-	/**Request parameter name for page ID*/
-	var PARAM_PAGE = "page";
-	/**Request parameter name for indicating whether to include extra data*/
-	var PARAM_INCLUDE_EXTRA = "includeExtra";
-	/**Request parameter name for note content text*/
-	var PARAM_TEXT = "text";
-	/**Request parameter name for note topic*/
-	var PARAM_TOPIC = "topic";
-	/**Request parameter name for note extra data*/
-	var PARAM_DATA_JSON = "data";
-	/**Request parameter name for note last modified time*/
-	var PARAM_LAST_MODIFIED = "time";
-	/**Request parameter name for an array of notes*/
-	var PARAM_NOTES = "notes";
-	/**Request parameter name for a total note count*/
-	var PARAM_TOTAL = "total";
-	/**Request parameter name for an array of errors*/
-	var PARAM_ERRORS = "errors";
-	/**Request parameter name for an object containing per-page note counts*/
-	var PARAM_COUNTS = "counts";
+	/**A server response object
+	 * @memberof additionalcontent
+	 * @mixin
+	 * @typedef {Object} Response
+	 * @property {boolean} success		True if the request was successful
+	 * @property {string[]} [errors]	An array of errors that were encountered while processing the request*/
 	
-	/**Default note type*/
-	var TYPE_NOTE = "note";
-	/**The server endpoint for the notes API*/
-	var ENDPOINT = "/o/material-notes/";
+	/**A callback that receives all content on a page
+	 * @memberof additionalcontent
+	 * @callback AllContentCallback
+	 * @param {additionalcontent.Response} response							The server response
+	 * @param {Object.<string, additionalcontent.Content>} [response.files]	An object mapping content IDs to Content objects
+	 * @param {additionalcontent.ContentFolder} [response.libraryFiles]		The library additional content on the page
+	 * @param {additionalcontent.ContentFolder} [response.userFiles]		The user additional content on the page*/
 	
-	/** The different typese of note changed events */
-	var NOTE_CHANGED_TYPES = {
-		Created: 1,
-		Updated: 2,
-		Deleted: 3
+	/**A callback that receives content that was specifically requested
+	 * @memberof additionalcontent
+	 * @callback ContentCallback
+	 * @param {additionalcontent.Response} response							The server response
+	 * @param {Object.<string, additionalcontent.Content>} [response.files]	An object mapping content IDs to Content objects*/
+	
+	/**A callback that receives a content download URL
+	 * @memberof additionalcontent
+	 * @callback URLCallback
+	 * @param {additionalcontent.Response} response		The server response
+	 * @param {string} [response.downloadUrl]			The requested URL*/
+	
+	/**A generic callback that receives information about an operation's success or failure
+	 * @memberof additionalcontent
+	 * @callback GenericCallback
+	 * @param {additionalcontent.Response} response	The server response*/
+	
+	/**The native JS File type
+	 * @external File
+	 * @see {@link https://developer.mozilla.org/en-US/docs/Web/API/File|File}*/
+	
+	/**Servlet address*/
+	var ENDPOINT = "/o/related-content/";
+	/**Material ID parameter*/
+	var PARAM_MATERIAL_ID = "materialId";
+	/**Page ID parameter*/
+	var PARAM_PAGE_ID = "pageId";
+	/**Content ID parameter*/
+	var PARAM_CONTENT_ID = "fileId";
+	/**Playlist ID parameter*/
+	var PARAM_PLAYLIST_ID = "playlistId";
+	/**File name parameter*/
+	var PARAM_FILENAME = "fileName";
+	
+	/**Loads all additional content for a given material page.
+	 * <br>Can produce the following errors:
+	 * <ul>
+	 * <li><b>no-such-material</b> if the requested material ID does not match any available material
+	 * <li><b>no-such-page</b> if the requested page ID does not match any valid page
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {additionalcontent.AllContentCallback} [callback]	A callback to receive the data
+	 * @param {string} [requestedMaterial=current material id]	The requested material ID of the material containing the page
+	 * @param {string} [pageId=current page id]					The ID of the page whose additional content should be retrieved*/
+	function getContents(callback, requestedMaterial, pageId){
+		var data = {};
+		data[PARAM_MATERIAL_ID] = requestedMaterial || material.getRequestedMaterial();
+		data[PARAM_PAGE_ID] = pageId || material.getCurrentPageId();
+		utils.post(ENDPOINT + "contents", data, callback);
 	}
 	
-	var noteChangedListeners = []
-	
-	/**Gets all notes on a page
-	 * @memberof notes
-	 * @param {notes.NotesCallback} [callback]			A callback to handle the data
-	 * @param {boolean} [includeExtra=false]			Whether to include topic and dataJSON in note data
-	 * @param {number} [materialId=current material ID]	The ID of the material containing the notes
-	 * @param {string} [pageId=current page ID]			The ID of the page containing the notes
-	 * @param {string} [type="note"]					The type of notes to get*/
-	function getNotesForPage(callback, includeExtra, materialId, pageId, type){
-		materialId = materialId || material.getCurrentMaterialId();
-		pageId = pageId || material.getCurrentPageId();
-		type = type || TYPE_NOTE;
-		
-		var params = {};
-		params[PARAM_MATERIAL] = materialId;
-		params[PARAM_PAGE] = pageId;
-		params[PARAM_TYPE] = type;
-		params[PARAM_INCLUDE_EXTRA] = includeExtra;
-		
-		utils.post(ENDPOINT + "get-notes-for-page", params, callback);
+	/**Gets the data of an individual additional content file.
+	 * <br>Can produce the following errors:
+	 * <ul>
+	 * <li><b>content-not-available</b> if the requested content ID does not match any available content
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {string} contentId								The ID of the content to get
+	 * @param {string} [playlistId]								The ID of the currently active playlist if any
+	 * @param {additionalcontent.ContentCallback} [callback]	A callback to receive the result*/
+	function getSingleContent(contentId, playlistId, callback){
+		var data = {};
+		data[PARAM_CONTENT_ID] = contentId;
+		data[PARAM_PLAYLIST_ID] = playlistId;
+		utils.post(ENDPOINT + "content", data, callback);
 	}
 	
-	/**Gets all notes in a material
-	 * @memberof notes
-	 * @param {notes.NotesCallback} [callback]			A callback to handle the data
-	 * @param {boolean} [includeExtra=false]			Whether to include topic and dataJSON in note data
-	 * @param {number} [materialId=current material ID]	The ID of the material containing the notes
-	 * @param {string} [type="note"]					The type of notes to get*/
-	function getNotesForMaterial(callback, includeExtra, materialId, type){
-		materialId = materialId || material.getCurrentMaterialId();
-		type = type || TYPE_NOTE;
-		
-		var params = {};
-		params[PARAM_MATERIAL] = materialId;
-		params[PARAM_TYPE] = type;
-		params[PARAM_INCLUDE_EXTRA] = includeExtra;
-		
-		utils.post(ENDPOINT + "get-notes-for-material", params, callback);
+	/**Uploads a file to the userFiles additional content folder.
+	 * <br>Can produce the following errors:
+	 * <ul>
+	 * <li><b>invalid-upload</b> if the sent file was not successfully received by the server
+	 * <li><b>upload-not-permitted</b> if the user is not allowed to upload additional content files
+	 * <li><b>upload-failed</b> if the file was received but could not be saved
+	 * <li><b>invalid-upload</b> if the sent file was not successfully received by the server
+	 * <li><b>file-too-large</b> if the sent file was larger than the server allows
+	 * <li><b>no-such-material</b> if the requested material ID does not match any available material
+	 * <li><b>no-such-page</b> if the requested page ID does not match any valid page
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {external:File} file	The file to upload
+	 * @param {string} [name=file.name]														A custom file name for the file
+	 * @param {additionalcontent.GenericCallback} [callback]								A callback to handle the server response
+	 * @param {number} [materialId=current material ID]										The ID of the material to contain the content
+	 * @param {string} [pageId=current page ID]												The ID of the page to contain the content*/
+	function uploadUserFile(file, name, callback, materialId, pageId){
+		var data = {};
+		data[PARAM_MATERIAL_ID] = materialId || material.getCurrentMaterialId();
+		data[PARAM_PAGE_ID] = pageId || material.getCurrentPageId();
+		data[PARAM_FILENAME] = name || file.name;
+		utils.upload(ENDPOINT + "add-file", data, file, callback);
 	}
 	
-	/**Gets the per-page counts of all notes in a material
-	 * @memberof notes
-	 * @param {notes.CountsCallback} [callback]			A callback to handle the data
-	 * @param {number} [materialId=current material ID]	The ID of the material containing the notes
-	 * @param {string} [type="note"]					The type of notes to get*/
-	function getNoteCounts(callback, materialId, type){
-		materialId = materialId || material.getCurrentMaterialId();
-		type = type || TYPE_NOTE;
-		
-		var params = {};
-		params[PARAM_MATERIAL] = materialId;
-		params[PARAM_TYPE] = type;
-		
-		utils.post(ENDPOINT + "get-counts", params, callback);
+	/**Deletes a user-uploaded additional content file.
+	 * <br>Can produce the following errors:
+	 * <ul>
+	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {string} contentId								The ID of the file to delete
+	 * @param {additionalcontent.GenericCallback} [callback]	A callback to handle the server response*/
+	function deleteUserFile(contentId, callback){
+		var data = {};
+		data[PARAM_CONTENT_ID] = contentId;
+		utils.post(ENDPOINT + "delete-file", data, callback);
 	}
 	
-	/**Creates a new note on a page
-	 * @memberof notes
-	 * @param {notes.NewNoteCallback} [callback]		A callback invoked after the note has been created
-	 * @param {string} [text]							The text content of the note
-	 * @param {string} [topic]							The topic of the note
-	 * @param {Object} [data]							Extra JSON data to include with the note
-	 * @param {number} [materialId=current material ID]	The ID of the material containing the note. Should always be specified if pageId is present.
-	 * @param {string} [pageId=current page ID]			The ID of the page containing the note
-	 * @param {string} [type="note"]					The type of the note*/
-	function addNoteToPage(callback, text, topic, data, materialId, pageId, type){
-		materialId = materialId || material.getCurrentMaterialId();
-		pageId = pageId || material.getCurrentPageId();
-		type = type || TYPE_NOTE;
+	/**Renames a user-uploaded additional content file.
+	 * C<br>an produce the following errors:
+	 * <ul>
+	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to rename it
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {string} contentId								The ID of the file to delete
+	 * @param {string} name										The new name of the file
+	 * @param {additionalcontent.GenericCallback} [callback]	A callback to handle the server response*/
+	function renameUserFile(contentId, name, callback){
+		var data = {};
+		data[PARAM_CONTENT_ID] = contentId;
+		data[PARAM_FILENAME] = name;
+		utils.post(ENDPOINT + "rename-file", data, callback);
+	}
+	
+	/**Gets a download link to an additional content file. This should only be called immediately before starting the download, as
+	 * the URL may expire over time.
+	 * <br>Can produce the following errors:
+	 * <ul>
+	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
+	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {string} contentId								The ID of the file to delete
+	 * @param {string} [playlistId]								The ID of the current playlist (if any). Required to download other users' user
+	 * 															content from playlists.
+	 * @param {additionalcontent.URLCallback} [callback]		A callback to handle the server response*/
+	function getDownloadLink(contentId, playlistId, callback){
+		var data = {};
+		data[PARAM_CONTENT_ID] = contentId;
+		data[PARAM_PLAYLIST_ID] = playlistId;
+		utils.post(ENDPOINT + "download-link", data, callback);
+	}
+	
+	return {
+		getContents: getContents,
+		getSingleContent: getSingleContent,
+		uploadUserFile: uploadUserFile,
+		deleteUserFile: deleteUserFile,
+		renameUserFile: renameUserFile,
+		getDownloadLink: getDownloadLink
+	};
+});
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/notifications', ["./utils", "./dialog", "fi.cloubi.lib.js/offline", "fi.cloubi.lib.js/modernizr-custom", "fi.cloubi.lib.js/jquery-ui"], function(utils, dialogs) {	
 		
-		var params = {};
-		params[PARAM_MATERIAL] = materialId;
-		params[PARAM_PAGE] = pageId;
-		params[PARAM_TYPE] = type;
-		params[PARAM_TEXT] = text;
-		params[PARAM_TOPIC] = topic;
-		params[PARAM_DATA_JSON] = data;
-		
-		utils.post(
-			ENDPOINT + "insert-note", 
-			params, 
-			function(response) { 
-				callback(response); 
+	jQuery(document).ajaxError(function(event, jqxhr, settings, thrownError){
 				
-				noteChanged(NOTE_CHANGED_TYPES.Created, 
-					response.id, 
-					{	
-						text: text, 
-						topic: topic, 
-						data: data, 
-						materialId: materialId, 
-						pageId: pageId,
-						type: type
-					}
-				);
-			}
-		);
+		if ( settings.skipReconnectCheck ) {
+			return;
+		}
 		
-	}
+		createReconnectNotification();
+								
+	});
+			
+	var cloubiOfflineCallbacks = [];
+	var customCloubiOfflineCallbacks = [];
+	var offlineCallbacks = [];
+	var customOfflineCallbacks = [];
+	var onlineCallbacks = [];
+	var customOnlineCallbacks = [];
+	var customReconnectCallbacks = [];
+	var reconnectCallbacks = [];
+	var smallScreenResolutionCallbacks = [];
+	var customSmallScreenResolutionCallbacks = [];
+	var slowConnectionCallbacks = [];	
+	var browserNotSupportedCallbacks = [];	
+	var customBrowserNotSupportedCallbacks = [];
 	
-	/**Creates a new note on a material
-	 * @memberof notes
-	 * @param {notes.NewNoteCallback} [callback]		A callback invoked after the note has been created
-	 * @param {string} [text]							The text content of the note
-	 * @param {string} [topic]							The topic of the note
-	 * @param {Object} [data]							Extra JSON data to include with the note
-	 * @param {number} [materialId=current material ID]	The ID of the material containing the note
-	 * @param {string} [type="note"]					The type of the note*/
-	function addNoteToMaterial(callback, text, topic, data, materialId, type){
-		materialId = materialId || material.getCurrentMaterialId();
-		type = type || TYPE_NOTE;
-		
-		var params = {};
-		params[PARAM_MATERIAL] = materialId;
-		params[PARAM_TYPE] = type;
-		params[PARAM_TEXT] = text;
-		params[PARAM_TOPIC] = topic;
-		params[PARAM_DATA_JSON] = data;
-		
-		utils.post(
-			ENDPOINT + "insert-note", 
-			params,
-			function(response) { 
-				callback(response); 
+	var smallScreenResolutionLimit = 480;
+
+	var googleUrl = 'https://www.google.fi/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png';
+	
+	//var url = window.location.origin + "/html/icons/default.png";			
+	/*
+	if ( window.location.hostname === "localhost" ) {
+		//url = "https://cloubi-frame-dev.ubilabs.fi/html/icons/default.png";
+	}
+	*/	
+	
+	/* SLOW CONNECTION SPEED 
+	function onSlowConnection(callback) {
+		slowConnectionCallbacks.push(callback);		
+	}	
+	
+	
+	var slowConnectionTimeout = setTimeout(function(){
 				
-				noteChanged(NOTE_CHANGED_TYPES.Created, 
-					response.id, 
-					{	
-						text: text, 
-						topic: topic, 
-						data: data, 
-						materialId: materialId, 
-						type: type
-					}
-				);
-			}
-		);
-	}
-	
-	/**Updates an existing note. Pass undefined to leave a field unchanged, passing null will set it to empty.
-	 * @memberof notes
-	 * @param {string} id								The ID of the note to update
-	 * @param {notes.NoteModifiedCallback} [callback]	A callback invoked after the note has been updated
-	 * @param {string} [text]							The text content of the note
-	 * @param {string} [topic]							The topic of the note
-	 * @param {Object} [data]							Extra JSON data to include with the note
-	 * @param {number} [materialId]						The ID of the material containing the note. Should always be specified if pageId is present.
-	 * @param {string} [pageId]							The ID of the page containing the note. Should always be specified if materialId is present 
-	 * 													(pass null to associate the note to the material itself).
-	 * @param {string} [type]							The type of the note*/
-	function updateNote(id, callback, text, topic, data, materialId, pageId, type){
-		
-		var params = {};
-		params[PARAM_ID] = id;
-		params[PARAM_MATERIAL] = materialId;
-		params[PARAM_PAGE] = pageId;
-		params[PARAM_TYPE] = type;
-		params[PARAM_TEXT] = text;
-		params[PARAM_TOPIC] = topic;
-		params[PARAM_DATA_JSON] = data;
-		
-		utils.post(
-			ENDPOINT + "update-note", 
-			params, 
-			function(response) { 
-				callback(response); 
+		trigger(slowConnectionCallbacks);
 				
-				noteChanged(NOTE_CHANGED_TYPES.Updated, 
-					response.id, 
-					{
-						text: text, 
-						topic: topic, 
-						data: data, 
-						materialId: materialId, 
-						pageId: pageId,
-						type: type
-					}
-				);
-			}
-		);
-	}
+	}, 1000);
 	
-	/**Deletes a note
-	 * @memberof notes
-	 * @param {string} id								The ID of the note to update
-	 * @param {notes.NoteModifiedCallback} [callback]	A callback invoked after the note has been deleted*/
-	function deleteNote(id, callback){
-		var params = {};
-		params[PARAM_ID] = id;
+	window.addEventListener( 'load', function() {
 		
-		utils.post(
-			ENDPOINT + "delete-note", 
-			params, 
-			function(response) {
-				callback(response);
-				noteChanged(NOTE_CHANGED_TYPES.Deleted, id);
+		try {
+            window.clearTimeout( slowConnectionTimeout );
+        } catch (e){
+        }
+
+    });
+	*/
+	
+	/* ONLINE/OFFLINE CHECK */
+	Offline.options = {
+		checkOnLoad: true,
+		interceptRequests: true,		
+		reconnect: { 
+			initialDelay: 3,
+			delay: 10
+		},		
+		checks: {	
+			image: {
+				url: googleUrl + "?_=" + ((new Date()).getTime())
+			},
+			active: 'image'
+		},
+		requests: false,
+		game: false		
+	}	
+	
+	Offline.on("confirmed-up", function(){			
+		
+		if ( window.navigator.onLine ) {
+			
+			if ( customOnlineCallbacks.length > 0 ) {
+				trigger(customOnlineCallbacks);
+			} else {
+				trigger(onlineCallbacks);
 			}
-		);
+			
+			changeImageUrl();
+			
+		} else {
+			
+			Offline.state = 'down;'
+			Offline.check();
+		
+		}
+		
+	});
+	
+	function setCheckOnLoad(value) {
+		Offline.options.checkOnLoad = value;
 	}
 	
-	/**Gets an URL that can be used to download a text file containing the user's notes on a page
-	 * @memberof notes
-	 * @param {number} [materialId=current material ID]	The ID of the material containing the note
-	 * @param {string} [pageId=current page ID]			The ID of the page containing the note
-	 * @return {string}	The URL*/
-	function getDownloadUrlForPageNotes(materialId, pageId){
-		materialId = materialId || material.getCurrentMaterialId();
-		pageId = pageId || material.getCurrentPageId();
-		return ENDPOINT + "text-notes?" + PARAM_MATERIAL + "=" + materialId + "&" + PARAM_PAGE + "=" + pageId;
+	function changeImageUrl() {		
+		Offline.options.checks.image['url'] = googleUrl + "?_=" + ((new Date()).getTime());
+	}	
+		
+	var timeOnDown = 0;	
+	function timeElapsed(ms) {
+				
+		return ms - timeOnDown;
+		
 	}
 	
-	/**Gets an URL that can be used to download a text file containing the user's notes in a material
-	 * @memberof notes
-	 * @param {number} [materialId=current material ID]	The ID of the material containing the note
-	 * @return {string}	The URL*/
-	function getDownloadUrlForMaterialNotes(materialId){
-		materialId = materialId || material.getCurrentMaterialId();
-		return ENDPOINT + "text-notes?" + PARAM_MATERIAL + "=" + materialId;
-	}
-	
-	/**Gets the ID of the last page that the user has accessed in a material
-	 * @memberof notes
-	 * @param {notes.PageIDCallback} callback			A callback to handle the ID
-	 * @param {number} [materialId=current material ID]	The ID of the material*/
-	function getLastPageId(callback, materialId){
-		materialId = materialId || material.getCurrentMaterialId();
-		getNotesForMaterial(function(response){
-			if (response.notes && response.notes.length > 0){
-				callback(response.notes[0][PARAM_PAGE]);
+	function _trapFocusKeyup(ev){
+		if (ev.key === "Tab"){
+			var trap = jQuery(".cloubi-notifications-focus-trap");
+			if (!jQuery.contains(trap[0], document.activeElement)){
+				if (ev.shiftKey){
+					trap.find(":focusable").last().focus();
+				}
+				else {
+					trap.find(":focusable").first().focus();
+				}
 			}
-			else {
-				callback(undefined);
-			}
-		}, true, materialId, "lastpage");
-	}
-	
-	/**
-	 * Calls all the note changed listeners
-	 * 
-	 * @param {int} Event type
-	 * @param {string} Note's ID
-	 * @param {Object} New note data.
-	 */
-	function noteChanged(evtType, id, payload) {
-		noteChangedListeners.forEach(function(func){ func(evtType, id, payload) });
-	}
-	
-	
-	/**
-	 * Registers a change listener for when a note has been changed
-	 * @param {NoteChangedCallback} The callback listener
-	 */
-	function onNoteChanged(callback) {
-		noteChangedListeners.push(callback)
-	}
-	
-	/**
-	 * Removes a note changed listener
-	 * @param {NoteChangedCallback} The callback listener
-	 */
-	function offNoteChanged(callback) {		
-    	var idx = noteChangedListeners.findIndex(callback);
-    	
-		if(idx !== -1) {
-			noteChangedListeners.splice(idx, 1);
 		}
 	}
- 	
-	return {
-		getNotesForPage: getNotesForPage,
-		getNotesForMaterial: getNotesForMaterial,
-		getNoteCounts: getNoteCounts,
-		addNoteToPage: addNoteToPage,
-		addNoteToMaterial: addNoteToMaterial,
-		updateNote: updateNote,
-		deleteNote: deleteNote,
-		getDownloadUrlForPageNotes: getDownloadUrlForPageNotes,
-		getDownloadUrlForMaterialNotes: getDownloadUrlForMaterialNotes,
-		getLastPageId: getLastPageId,
-		noteChanged: noteChanged,
-		onNoteChanged: onNoteChanged,
-		offNoteChanged: offNoteChanged,
-		NOTE_CHANGED_TYPES: NOTE_CHANGED_TYPES
-	};
 	
+	function _trapFocusKeydown(ev){
+		if (ev.key === "Tab"){
+			var trap = jQuery(".cloubi-notifications-focus-trap");
+			var focusables = trap.find(":focusable");
+			if (ev.shiftKey && focusables.first().is(jQuery(document.activeElement))){
+				focusables.last().focus();
+				ev.preventDefault();
+				ev.stopPropagation();
+			}
+			else if (!ev.shiftKey && focusables.last().is(jQuery(document.activeElement))){
+				focusables.first().focus();
+				ev.preventDefault();
+				ev.stopPropagation();
+			}
+			
+		}
+	}
+	
+	function _trapIframeFocus(){
+		jQuery(".cloubi-notifications-focus-trap :focusable").first().focus();
+	}
+	
+	function _setupFocusTrap(){
+		setTimeout(function(){
+			jQuery(".cloubi-notifications-focus-trap:visible :focusable").first().focus();
+		});
+		
+		jQuery(window).on("keydown", _trapFocusKeydown);
+		jQuery(window).on("keyup", _trapFocusKeyup);
+		var frames = jQuery("iframe");		
+		frames.each(function(index, elem){
+			var self = jQuery(elem);
+			self.attr("data-tabindex-cache", self.attr("tabindex"));
+			self.attr("tabindex", -1);
+		});
+	}
+	
+	function _teardownFocusTrap(){
+		jQuery(window).off("keydown", _trapFocusKeydown);
+		jQuery(window).off("keyup", _trapFocusKeyup);
+		var frames = jQuery("iframe");		
+		frames.each(function(index, elem){
+			var self = jQuery(elem);
+			if (elem.hasAttribute("data-tabindex-cache")){
+				self.attr("tabindex", self.attr("data-tabindex-cache"));
+			}
+			else {
+				self.removeAttr("tabindex");
+			}
+		});
+	}
+	
+	function createReconnectNotification() {
+		
+		if ( jQuery(".cloubi-notifications-reconnect-notification").length > 0 ) {
+			return;
+		}
+		
+		var curtain = jQuery("<div class='cloubi-notifications-reconnect-notification cloubi-notifications-focus-trap' tabindex='-1'></div>");
+		var text = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-reconnecting'));
+		curtain.append(text);
+		
+		if ( Offline.state == "down" && !window.navigator.onLine ) {
+			var spinner = jQuery("<span class='cloubi-notifications-reconnect-spinner'><i class='fa fa-5x fa-circle-o-notch fa-spin'></i></span>");
+		}
+		
+		curtain.append(spinner);
+		curtain.appendTo("body");
+		_setupFocusTrap();
+	}
+		
+	function removeReconnectNotification() {		
+		jQuery(".cloubi-notifications-reconnect-notification").remove();
+		_teardownFocusTrap();
+	}
+	
+	Offline.on("reconnect:started", function(){
+		createReconnectNotification();		
+	});
+	
+	Offline.on("reconnect:stopped", function(){		
+		removeReconnectNotification();
+	});
+		
+	Offline.on("reconnect:tick", function(){
+		
+		if ( customReconnectCallbacks.length > 0) {
+			trigger(customReconnectCallbacks);			
+		} else {
+			trigger(reconnectCallbacks);
+		}
+		
+	});
+
+	Offline.on("down", function(){	
+
+		timeOnDown = new Date().getTime();
+			
+		/*
+		if ( customOfflineCallbacks.length > 0 ) {
+			trigger(customOfflineCallbacks);
+		} else {
+			trigger(offlineCallbacks);
+		}
+		*/
+		
+	});
+	
+	function onReconnectTick(callback) {
+		
+		if ( callback ) {
+			customReconnectCallbacks.push(callback);			
+		} else {			
+			reconnectCallbacks.push(defaultOnReconnectTick);
+		}	
+
+	}
+	
+	function defaultOnReconnectTick() {
+		
+		console.log("reconnect:tick");
+				
+		var time = new Date();
+		
+		if ( timeElapsed(time.getTime()) > 15000 && Offline.state == "down" ) {
+			
+			removeReconnectNotification();
+			
+			if ( dialogs && !dialogs.getDialog('offlineDialog') ) {
+
+				if ( customOfflineCallbacks.length > 0 ) {
+					trigger(customOfflineCallbacks);
+				} else {
+					trigger(offlineCallbacks);
+				}
+				
+			} else {
+				
+				createNotificationByType('offline');
+				
+			}
+			
+		}
+	}
+			
+	function testCloubiConnection() {
+				
+		var server1NotFound = false;
+		var server2NotFound = false;
+		var img1 = new Image;
+		var img2 = new Image;
+		img1.onerror = function() {
+			server1NotFound = true;	
+		}
+		img2.onerror = function() {
+			server2NotFound = true;			
+		}
+		
+		img1.src = 'https://frame.otava.fi/html/icons/default.png';			
+		img2.src = 'https://digitehtavat.otava.fi/html/icons/default.png';
+		
+		setTimeout(function(){
+			
+			if ( server1NotFound || server2NotFound ) {
+				
+				if ( customCloubiOfflineCallbacks.length > 0 ) {
+					trigger(customCloubiOfflineCallbacks);
+				} else {
+					trigger(cloubiOfflineCallbacks);
+				}
+				
+			}
+			
+		}, 1000);
+			
+	}
+	
+	/*
+	Offline.on("reconnect:connecting", function(){
+		trigger(reconnectCallbacks);			
+	});
+	*/
+	
+	function defaultCloubiOfflineCallback() {
+						
+		var onlineDialog = dialogs.getDialog('onlineDialog');
+		if ( onlineDialog )
+			dialogs.closeDialog(onlineDialog);	
+		
+		var offlineDialog = dialogs.getDialog('offlineDialog');
+		if ( offlineDialog )
+			dialogs.closeDialog(offlineDialog);
+		
+		var dialog = dialogs.create(undefined, 'cloubiOfflineDialog');
+		dialogs.addCurtainClass("cloubi-notification-curtain");
+		dialogs.addClass("cloubi-default-notification cloubi-offline");
+				
+		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
+		var header = jQuery('<h3></h3>').text(Liferay.Language.get('cloubi-notification-connection-down-header'));
+		var paragraph1 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-1'));
+		var paragraph2 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-2'));
+		var paragraph3 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-3'));
+		wrapper.append(header).append(paragraph1).append(paragraph2).append(paragraph3);	
+		
+		var content = dialogs.getContentElem(dialog);		
+		content.empty().append(wrapper);
+				
+	}
+	
+	function onCloubiOffline(callback) {
+			
+		if ( callback ) {
+			customCloubiOfflineCallbacks.push(callback);							
+		} else {			
+			cloubiOfflineCallbacks.push(defaultCloubiOfflineCallback);			
+		}
+		
+	}
+					
+	function defaultOfflineCallback() {
+		
+		if ( dialogs ) {
+			
+			var onlineDialog = dialogs.getDialog('onlineDialog');
+			if ( onlineDialog )
+				dialogs.closeDialog(onlineDialog);	
+			
+			var cloubiOfflineDialog = dialogs.getDialog('cloubiOfflineDialog');
+			if ( cloubiOfflineDialog )
+				dialogs.closeDialog(cloubiOfflineDialog);
+			
+			var dialog = dialogs.create(undefined, 'offlineDialog');
+			dialogs.addCurtainClass(dialog, "cloubi-notification-curtain");
+			dialogs.addClass(dialog, "cloubi-default-notification offline");
+			
+			var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
+			var header = jQuery('<h3></h3>').text(Liferay.Language.get('cloubi-notification-connection-down-header'));
+			var paragraph1 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-1'));
+			var paragraph2 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-2'));
+			var paragraph3 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-3'));
+			wrapper.append(header).append(paragraph1).append(paragraph2).append(paragraph3);		
+			
+			var content = dialogs.getContentElem(dialog);		
+			content.attr("tabindex", "-1")
+			content.empty().append(wrapper);
+			content.focus();
+			
+		}
+		
+	}
+	
+	function onOffline(callback) {
+						
+		if ( callback ) {
+			customOfflineCallbacks.push(callback);						
+		} else {			
+			offlineCallbacks.push(defaultOfflineCallback);
+		}
+		
+	}
+	
+	function defaultOnlineCallback() {
+		
+		jQuery(".cloubi-default-notification.offline").closest(".cloubi-modal-dialog-curtain").remove();
+		
+		if ( Offline.state === "up" ) {
+			return;
+		}
+		
+		if ( dialogs ) {
+			
+			var cloubiOfflineDialog = dialogs.getDialog('cloubiOfflineDialog');			
+			if ( cloubiOfflineDialog )
+				dialogs.closeDialog(cloubiOfflineDialog);
+			
+			var offlineDialog = dialogs.getDialog('offlineDialog');
+			if ( offlineDialog )
+				dialogs.closeDialog(offlineDialog);
+			
+			var dialog = dialogs.create(undefined, 'onlineDialog');		
+			dialogs.addCurtainClass(dialog, "cloubi-notification-curtain");
+			dialogs.addClass(dialog, "cloubi-default-notification online");
+			var icon = jQuery("<div class='icon info'></div>");
+			var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
+			var header = jQuery('<h3></h3>').text(Liferay.Language.get('cloubi-notification-connection-up')); 
+			wrapper.append(icon).append(header);	
+			
+			var content = dialogs.getContentElem(dialog);	
+			content.attr("tabindex", "-1")
+			content.empty().append(wrapper);
+			content.focus();
+			
+			setTimeout(function(){
+				dialogs.closeDialog('onlineDialog');
+			}, 2000);
+			
+		} else {
+			
+			createNotificationByType('online');
+			
+			setTimeout(function(){
+				jQuery(".cloubi-default-notification.online").closest(".cloubi-modal-dialog-curtain").remove();
+			}, 2000);
+			
+		}		
+		
+	}
+	
+	function onOnline(callback) {
+		
+		if ( callback ) {
+			customOnlineCallbacks.push(callback);			
+		} else {
+			onlineCallbacks.push(defaultOnlineCallback);
+		}
+						
+	}
+	
+	/*
+	function onReconnect(callback) {
+		reconnectCallbacks.push(callback);		
+	}
+	*/
+	
+	
+	function createCross(dialog) {
+		
+		dialogs.createCross(dialog, function() {
+			hideDialog();
+			localStorage.setItem("cloubi-notification-dismiss", "true");
+		});
+		
+	}
+	
+	function createNotificationByType(type) {
+		
+		var dialogClass = ".cloubi-default-notification." + type;
+		
+		if ( jQuery(dialogClass).length > 0 ) {
+			return;
+		}
+		
+		var curtain = jQuery('<div class="cloubi-modal-dialog-curtain cloubi-notification-curtain"></div>');
+		var dialog = jQuery('<div class="cloubi-modal-dialog cloubi-default-notification"></div>');		
+		dialog.addClass(type);		
+		var header = jQuery('<div class="cloubi-modal-dialog-header"></div>');
+		var contentWrapper = jQuery('<div class="cloubi-modal-dialog-content-wrapper"></div>');
+		var content = jQuery('<div class="cloubi-modal-dialog-content"></div>');
+		var footer = jQuery('<div class="cloubi-modal-dialog-footer"></div>');
+		
+		curtain.append(dialog);
+
+		contentWrapper.append(content);
+		
+		dialog.append(header).append(contentWrapper).append(footer);
+		
+		if ( type == 'offline' ) {
+			var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
+			var header = jQuery('<h3></h3>').text(Liferay.Language.get('cloubi-notification-connection-down-header'));
+			var paragraph1 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-1'));
+			var paragraph2 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-2'));
+			var paragraph3 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-3'));
+			wrapper.append(header).append(paragraph1).append(paragraph2).append(paragraph3);		
+		}
+		
+		if ( type == 'online' ) {
+			var icon = jQuery("<div class='icon info'></div>");
+			var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
+			var header = jQuery('<h3></h3>').text(Liferay.Language.get('cloubi-notification-connection-up')); 
+			wrapper.append(icon).append(header);	
+		}
+		
+		content.append(wrapper);
+		
+		curtain.appendTo('body');
+		
+	}
+	
+	function createNotification() {
+		
+		var dialog = dialogs.create(undefined, 'notificationDialog');
+		dialogs.addCurtainClass(dialog, "cloubi-notification-curtain");
+		dialogs.addCurtainClass(dialog, "cloubi-notifications-focus-trap");
+		dialogs.addClass(dialog, "cloubi-default-notification");
+		
+		dialogs.createButton(dialog, function() {
+			hideDialog();				
+			localStorage.setItem("cloubi-notification-dismiss", "true");
+		}, Liferay.Language.get('cloubi-dialog-close'));
+		
+		var content = dialogs.getContentElem(dialog);
+		if (dialog.curtain){
+			dialog.curtain.attr("role", "alertdialog");
+			dialog.curtain.attr("aria-labelledby", "cloubi-notifications-dialog-header");
+			dialog.curtain.attr("aria-describedby", "cloubi-notifications-dialog-message");
+		}
+		_setupFocusTrap();
+		
+		return dialog;
+	}
+	
+	function createMessage(dialog, header, text, showIcon, addClasses) {
+		
+		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
+		
+		if ( addClasses ) {
+			wrapper.addClass(addClasses);
+		}
+		
+		var icon = jQuery("<div class='icon warning'></div>");
+		var header = jQuery('<h3 id="cloubi-notifications-dialog-header"></h3>').text(header); 
+		var paragraph = jQuery('<p id="cloubi-notifications-dialog-message"></p>').text(text);
+		
+		if ( showIcon ) {
+			wrapper.append(icon);
+		}
+		
+		wrapper.append(header).append(paragraph);
+		
+		var content = dialogs.getContentElem(dialog);		
+		content.empty().append(wrapper);
+		
+	}
+	
+	function setSmallScreenResolutionLimit(limit) {
+		smallScreenResolutionLimit = limit;
+	}
+	
+	function getSmallScreenResolutionLimit() {
+		return smallScreenResolutionLimit;
+	}
+	
+	function defaultOnSmallScreenResolutionCallback() {
+				
+		if ( jQuery(window).width() < getSmallScreenResolutionLimit() ) {
+			
+			if ( jQuery(".cloubi-default-notification").length == 0 ) {
+				
+				var dialog = createNotification();
+				
+				createMessage(dialog, Liferay.Language.get('cloubi-notification-screen-resolution-too-small-header'), Liferay.Language.get('cloubi-notification-screen-resolution-too-small-info'), true, "small-screen-message");
+				
+				createCross(dialog);
+				
+				if ( jQuery(".cloubi-default-small-notification").length == 0 )						
+					createSmallNotification();				
+
+				if ( jQuery(".cloubi-default-notification").length > 1 || localStorage.getItem("cloubi-notification-dismiss") === "true") {
+					hideDialog();
+				}
+				
+			} else if ( jQuery(".small-screen-message").length == 0 ) {
+							
+				var dialog = dialogs && dialogs.getDialog('notificationDialog') ? dialogs.getDialog('notificationDialog') : createNotification();
+				createMessage(dialog, Liferay.Language.get('cloubi-notification-screen-resolution-too-small-header'), Liferay.Language.get('cloubi-notification-screen-resolution-too-small-info'), false, "small-screen-message");
+
+			}
+							
+		} else {
+			
+			jQuery(".small-screen-message").remove();
+			
+			var dialog = dialogs && dialogs.getDialog('notificationDialog') ? dialogs.getDialog('notificationDialog') : null;
+			
+			if ( dialog ) {
+				
+				if ( !isUnsupportedBrowser() ) {
+					
+					dialogs.closeDialog(dialog);
+					removeSmallNotification();
+					localStorage.removeItem("cloubi-notification-dismiss");
+					
+				}
+				
+			}
+			
+		} 	
+		
+	}
+	
+	function hideDialog() {		
+		jQuery(".cloubi-default-notification").closest(".cloubi-modal-dialog-curtain").hide();
+		_teardownFocusTrap();
+	}
+	
+	function removeSmallNotification() {		
+		jQuery(".cloubi-default-small-notification").remove();		
+	}
+		
+	function showDialog() {	
+		var dialog = jQuery(".cloubi-default-notification").closest(".cloubi-modal-dialog-curtain")
+		dialog.show();
+		_setupFocusTrap();
+	}
+	
+	function createSmallNotification() {
+
+		var notification = jQuery("<div></div>").attr("class", "cloubi-default-small-notification").attr("tabindex", "0").attr("role", "alert")
+			.attr("aria-labelledby", "cloubi-notifications-dialog-header")
+			.attr("aria-describedby", "cloubi-notifications-dialog-message");
+		var icon = jQuery("<div class='icon warning'></div>");
+		notification.append(icon);
+		
+		notification.click(function(){	
+			showDialog();
+		});
+		notification.on("keydown", function(ev){
+			if (ev.key === " " || ev.key === "Spacebar" || ev.key === "Enter"){
+				showDialog();
+			}
+		});
+				
+		notification.appendTo(jQuery("body"));
+						
+	}
+	
+	window.addEventListener("resize", utils.debounce(function() {
+		if ( customSmallScreenResolutionCallbacks.length > 0 ) {
+			trigger(customSmallScreenResolutionCallbacks);
+		} else {
+			trigger(smallScreenResolutionCallbacks);
+		}	
+	}, 500));
+			
+	window.addEventListener("resize", function(){
+		
+		setSmallNotificationPosition();
+		
+	});	
+		
+	function onSmallScreenResolution(callback) {
+		
+		if ( callback ) {
+			customSmallScreenResolutionCallbacks.push(callback);			
+		} else {			
+			smallScreenResolutionCallbacks.push(defaultOnSmallScreenResolutionCallback);
+		}		
+						
+	}
+				
+	function isUnsupportedBrowser() {
+		
+		if ( !Modernizr.csscalc || !Modernizr.cssremunit) {
+			return true;
+		}
+		
+		return false;
+		
+	}
+	
+	/* BROWSER NOT SUPPORTED */
+	function defaultBrowserNotSupportedCallback() {
+		
+		if ( isUnsupportedBrowser() ) {
+					
+			if ( jQuery(".cloubi-default-notification").length == 0 ) {
+				
+				var dialog = createNotification();
+				
+				createMessage(dialog, Liferay.Language.get('cloubi-notification-browser-not-supported-header'), Liferay.Language.get('cloubi-notification-browser-not-supported-info'), true);
+
+				createCross(dialog);
+				
+				if ( jQuery(".cloubi-default-small-notification").length == 0 )	
+					createSmallNotification();
+				 
+				if ( jQuery(".cloubi-default-notification").length > 1 || localStorage.getItem("cloubi-notification-dismiss") === "true" ) {
+					hideDialog();
+				}
+				
+			} else {
+				
+				var dialog = dialogs.getDialog('notificationDialog');
+				
+				createMessage(dialog, Liferay.Language.get('cloubi-notification-browser-not-supported-header'), Liferay.Language.get('cloubi-notification-browser-not-supported-info'), false);
+												
+			}
+			
+		} 
+		
+	}
+			
+	window.addEventListener("load", function(){		
+		
+		//testCloubiConnection();
+		
+		if ( customBrowserNotSupportedCallbacks.length > 0 ) {
+			trigger(customBrowserNotSupportedCallbacks);	
+		} else {
+			trigger(browserNotSupportedCallbacks);	
+		}	
+		
+		if ( customSmallScreenResolutionCallbacks.length > 0 ) {
+			trigger(customSmallScreenResolutionCallbacks);	
+		} else {
+			trigger(smallScreenResolutionCallbacks);	
+		}
+		
+		setSmallNotificationPosition();
+				
+	});
+		
+	function onBrowserNotSupported(callback) {
+		
+		if ( callback ) {
+			customBrowserNotSupportedCallbacks.push(callback);			
+		} else {			
+			browserNotSupportedCallbacks.push(defaultBrowserNotSupportedCallback);
+		}		
+						
+	}	
+	
+	function trigger(callbacks) {		
+		jQuery.each(callbacks, function(i, func){			
+			func();	
+		});
+	}
+		
+	function setSmallNotificationPosition(){
+		
+		var topBarHeight = jQuery("#frame-top-bar").height();
+		jQuery(".cloubi-default-small-notification").css("top", topBarHeight + 15);	
+		
+	}
+			
+	return {		
+		onCloubiOffline: onCloubiOffline,
+		onOffline: onOffline,
+		onOnline: onOnline,
+		onSmallScreenResolution: onSmallScreenResolution,
+		onBrowserNotSupported: onBrowserNotSupported,
+		hideDialog: hideDialog,
+		createCross: createCross,
+		createMessage: createMessage,
+		createNotification: createNotification,
+		createSmallNotification: createSmallNotification,
+		removeSmallNotification: removeSmallNotification,
+		isUnsupportedBrowser: isUnsupportedBrowser,
+		setSmallScreenResolutionLimit: setSmallScreenResolutionLimit,
+		getSmallScreenResolutionLimit: getSmallScreenResolutionLimit,
+		messages: {
+			screenResolutionTooSmallHeader: Liferay.Language.get('cloubi-notification-screen-resolution-too-small-header'),
+			screenResolutionTooSmallInfo: Liferay.Language.get('cloubi-notification-screen-resolution-too-small-info')
+		},
+		onReconnectTick: onReconnectTick,
+		setNeedForOnlineCheck: setCheckOnLoad
+		
+		/*onReconnect: onReconnect,		
+		onSlowConnection: onSlowConnection*/
+	};
+
+});
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/rest-client', ['fi.cloubi.lib.js/jquery'], function (jQuery) {
+
+    function RestClient(baseUrl) {
+        this.baseUrl = baseUrl;
+    }
+
+    RestClient.prototype.trackProgress = function (trackerId, progressCallback) {
+        var self = this;
+
+        return new Promise(function (resolve, reject) {
+            self.pollForProgress(trackerId, progressCallback, resolve, reject);
+        });
+    };
+
+    RestClient.prototype.pollForProgress = function (trackerId, progressCallback, success, failure) {
+        var self = this;
+
+        setTimeout(function () {
+            self.updateProgressTracker(trackerId).then(function (progressState) {
+                if (progressCallback != null) {
+                    progressCallback(progressState.percentage, progressState.description, progressState);
+                }
+
+                if (progressState.status === 'error') {
+                    failure(progressState.description);
+                } else if (progressState.status === 'success') {
+                    success(progressState.result);
+                } else {
+                    self.pollForProgress(trackerId, progressCallback, success, failure);
+                }
+            })
+                .catch(function (error) {
+                    failure(error);
+                });
+        }, 500);
+    };
+
+    RestClient.prototype.updateProgressTracker = function (trackerId) {
+        return this.GET('progress/job/' + trackerId);
+    };
+
+    RestClient.prototype.downloadFile = function (handler, downloadId) {
+        var xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function () {
+            if (this.readyState === 4 && this.status === 200) {
+
+                var contentDisposition = this.getResponseHeader("Content-Disposition");
+                var filename = "download";
+
+                if (contentDisposition && contentDisposition.indexOf('attachment') !== -1) {
+                    var filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                    var matches = filenameRegex.exec(contentDisposition);
+                    if (matches != null && matches[1]) {
+                        filename = matches[1].replace(/['"]/g, '');
+                    }
+                }
+
+                var url = window.URL.createObjectURL(this.response);
+                var anchor = document.createElement('a');
+
+                anchor.href = url;
+                anchor.download = filename;
+                anchor.click();
+                window.URL.revokeObjectURL(url);
+            }
+        };
+
+        xhr.open('GET', this.baseUrl + 'download/' + handler + '/' + downloadId);
+        xhr.responseType = 'blob';
+        xhr.send();
+    };
+
+    RestClient.prototype.uploadFile = function (url, files, progressTracker, optionalData) {
+        var self = this;
+
+        return new Promise(function (resolve, reject) {
+            var formData = new FormData();
+
+            if (files instanceof FileList) {
+                for (var i = 0; i < files.length; i++) {
+                    formData.append('encoded-filename', encodeURIComponent(files[i].name));
+                    formData.append('files', files[i]);
+                }
+            } else if (files instanceof File) {
+                formData.append('encoded-filename', encodeURIComponent(files.name));
+                formData.append('files', files);
+            }
+
+            if (optionalData) {
+                Object.keys(optionalData).forEach(function (key) {
+                    if (Array.isArray(optionalData[key])) {
+                        optionalData[key].forEach(function (item) {
+                            formData.append(key, item);
+                        });
+                    } else {
+                        formData.append(key, optionalData[key]);
+                    }
+                });
+            }
+
+            jQuery.ajax({
+                type: 'POST',
+                url: self.baseUrl + url,
+                cache: false,
+                contentType: false,
+                processData: false,
+                data: formData,
+                enctype: 'multipart/form-data',
+                success: function (data, status, xhr) {
+                    if (xhr.status === 202) {
+                        var trackerId = xhr.getResponseHeader('Progress-Tracker-Job-Id');
+                        self.trackProgress(trackerId, function (percentage, description) {
+                            progressTracker.progress = percentage;
+                        }).then(resolve).catch(reject);
+                    } else if (xhr.status === 200) {
+                        resolve(data);
+                    } else {
+                        reject(status);
+                    }
+                },
+                error: reject,
+                xhr: function () {
+                    var request = jQuery.ajaxSettings.xhr();
+                    if (request.upload) {
+                        request.upload.addEventListener('progress', function (event) {
+                            if (progressTracker && event.lengthComputable) {
+                                var max = event.total;
+                                var current = event.loaded;
+                                progressTracker.progress = (Math.round((current / max) * 100));
+                            }
+                        }, false);
+                    }
+                    return request;
+                }
+            });
+        });
+    };
+
+    RestClient.prototype.ajaxPromise = function (type, url, data) {
+        var self = this;
+        return new Promise(function (resolve, reject) {
+            var queryData = null;
+            if (type !== 'GET') {
+                queryData = JSON.stringify(data);
+            }
+
+            jQuery.ajax({
+                type: type,
+                url: self.baseUrl + url,
+                data: queryData,
+                contentType: 'application/json; charset=utf-8',
+                success: function (data, status, xhr) {
+                    if (xhr.status === 202) {
+                        resolve(xhr.getResponseHeader('Progress-Tracker-Job-Id'));
+                    } else {
+                        var contentDisposition = xhr.getResponseHeader('Content-Disposition');
+                        var contentType = xhr.getResponseHeader('Content-Type');
+                        if (contentDisposition) {
+                            resolve({
+                                "data": data,
+                                "contentDisposition": contentDisposition,
+                                "contentType": contentType
+                            });
+                        } else {
+                            resolve(data);
+                        }
+                    }
+                },
+                error: reject
+            });
+        });
+    };
+
+    RestClient.prototype.GET = function (url, data) {
+        if (data) {
+            var query = "?";
+            query += Object.entries(data)
+            .filter(function(pair) { return pair[1] !== undefined; })
+            .map(function(pair) {
+                if (Array.isArray(pair[1])) {
+                    return pair[1]
+                    .filter(function(value) { return value !== undefined; })
+                    .map(function(value) {
+                        return encodeURIComponent(pair[0]) + "=" + encodeURIComponent(value);
+                    }).join("&")
+                }
+                return encodeURIComponent(pair[0]) + "=" + encodeURIComponent(pair[1]);
+            }).join("&");
+            url += query;
+        }
+        return this.ajaxPromise('GET', url, null);
+  };
+
+  RestClient.prototype.POST = function (url, data) {
+    return this.ajaxPromise('POST', url, data);
+  };
+
+  RestClient.prototype.DELETE = function (url, data) {
+    return this.ajaxPromise('DELETE', url, data);
+  };
+
+  return RestClient;
 });
 
 define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/task', ['./utils', './material', './dialog', './adaptivity', './bigimage'], function (utils, material, dialogs, adaptivity, bigimage) {
@@ -6204,3792 +9959,6 @@ define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/task', ['./utils', './materi
 
 });
 
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/user-accounts', ['./utils'], function(utils) {
-
-	/**
-	 Contains functions for creating new user accounts, logging in, logging out and updating current user's details.
-	 <br><br>
-	 These function are intended to be used within the materials. For example, students could first start using a material 
-	 anonymously, i.e. without logging in, and then at later time register a new Cloubi user account so he/she can continue later.
-	 <br><br>
-	 
-	 To use this API, load it like this:
-	 
-	 <pre><code>
-require(['fi.cloubi.frontend/account'], function(accounts) {
-	accounts.getUserInfo(function(info) {
-		console.log(info);
-	});
-});
-	 </code></pre>
-	 
-	 * @namespace accounts */
-	
-	/**A callback for functions that will produce an UserInfo object.
-	 * @memberof accounts
-	 * @callback userInfoCallback
-	 * @param {?accounts.UserInfo} info		Information about current account or null if user is not logged in.*/
-	
-	/**A callback that will receive information about login attempt.
-	 * @memberof accounts
-	 * @callback loginCallback
-	 * @param {boolean} success					True, if the login attempt was successful. False, if user account does not exists or password is invalid.
-	 * 											For security reasons, missing account and wrong password produce the same error.
-	 */
-	
-	/**A callback that will be called after user has logged out.
-	 * @memberof accounts
-	 * @callback logoutCallback*/
-	
-	/**A callback that will receive information about user account update attempt.
-	 * @memberof accounts
-	 * @callback updateUserCallback
-	 * @param {boolean} success					True, if the login attempt was successful.
-	 * @param {Array.<string>} errors			If <code>success</code> is false, this array contains one or more of the following
-	  											error conditions: 'invalid-email', 'duplicate-email', 'first-name-empty', 'last-name-empty',
-	 											'invalid-password', 'passwords-do-not-match', 'too-short-password', 'too-trivial-password',
-	 											'edit-accounts-not-enabled', 'duplicate-username'.
-	 */
-	
-	/**A callback that will receive information about user account creation.
-	 * @memberof accounts
-	 * @callback registerUserCallback
-	 * @param {boolean} success					True, if the new user account was successfully created and user logged in. If false, possible
-	 											current user was not logged out.
-	 * @param {Array.<string>} errors			If <code>success</code> is false, this array contains one or more of the following
-	  											error conditions: 'invalid-email', 'duplicate-email', 'first-name-empty', 'last-name-empty',
-	 											'passwords-do-not-match', 'too-short-password', 'too-trivial-password', 'signup-not-enabled',
-	 											'duplicate-username'.
-	 */
-	
-	/**A callback that will called after a password reset link has been sent.
-	 * @memberof accounts
-	 * @callback resetLinkCallback
-	 */
-	
-	
-	
-	
-	/**An object representing the user account for logged in user. Some attributes are only used when updating the user account,
-	 * like password and newPassword. Some attributes cannot be updated, like the id. It depends on the server's configuration
-	 * wheter or not the email address can be changed.
-	 * @memberof accounts
-	 * @typedef {Object} UserInfo
-	 * @property {?string} id					The user ID.
-	 * @property {?string} firstName			First name of the user.
-	 * @property {?string} lastName				Last name of the user.
-	 * @property {?string} username				The username of the user.
-	 * @property {?string} email				Email address of the user.
-	 * @property {?string} password				User's current password.
-	 * @property {?string} newPassword			New password for the user.
-	 * @property {?string} newPasswordAgain		New password again.
-	 */
-	
-	
-	/**An object representing the global configuration of user accounts, such as wheter is possible to create new accounts or not.
-	 * @memberof accounts
-	 * @typedef {Object} Configuration
-	 * @property {boolean} signup				True, if its possible to create new accounts.
-	 * @property {boolean} editAccounts			True, if its possible to edit existing accounts.
-	 * @property {boolean} emailLogin			True, if login should be done with email address instead of username.
-	 */
-	
-	
-	
-	// This variable is used to hold transient information about user's state (logged in or not)
-	// after logIn, logOut or registerUser has been called. Before calling those functions,
-	// this variable must be null.
-	var loggedInState = null;
-	
-	
-	
-	/**Gets the current global configuration for user accounts.
-	 * @memberof accounts
-	 * @return {accounts.Configuration} The configuration.*/
-	function getConfiguration() {
-		return {
-			signup: Cloubi.userAccountConfig.signup,
-			editAccounts: Cloubi.userAccountConfig.editAccounts,
-			emailLogin: Cloubi.userAccountConfig.emailLogin
-		};
-	}
-	
-	
-	/**Gets information about currently logged in user, if there is one. 
-	 * @memberof accounts
-	 * @param {accounts.userInfoCallback} callback		A callback function that receives the user account info.*/
-	function getUserInfo(callback) {
-		if ( loggedInState ) {
-			callback(loggedInState.user);
-		} else {
-			if ( themeDisplay.isSignedIn() ) {
-				callback({
-					id: Cloubi.currentUser.userId,
-					firstName: Cloubi.currentUser.firstName,
-					lastName: Cloubi.currentUser.lastName,
-					email: Cloubi.currentUser.email,
-					username: Cloubi.currentUser.screenName,
-				});
-			} else {
-				callback(null);
-			}
-		}
-	}
-	
-	/**Checks if there is a logged in user. 
-	 * If there is, then the <code>getUserInfo()</code> function will provide a non-null UserInfo object. 
-	 * @memberof accounts
-	 * @return {boolean} True, if there is a logged in user.*/
-	function isLoggedIn() {
-		if ( loggedInState ) {
-			return loggedInState.loggedIn;
-		} else {
-			return themeDisplay.isSignedIn();
-		}
-	}
-	
-	/**Logins user with provided email address/username and password. If the user is already logged in with another user account,
-	 * then he/she will be first logged out. If the user has already logged in with this account, then this function does nothing.
-	 * Only email address or username can be used, depending on the configuration. See <code>getConfiguration</code>.
-	 * A callback will be called after the user has either successfully logged in or there is an error, like incorrect password.
-	 * It is highly recommended to reload the page after successful login, as rest of the page will be in invalid state.
-	 * @memberof accounts
-	 * @param email {string}						The email address of the user, or null if not used.
-	 * @param username {string}						The username of the user, or null if not used. 
-	 * @param password {string}						The password of the user.
-	 * @param callback {accounts.loginCallback}		A callback function for when the login attempt is completed.
-	 */
-	function logIn(email, username, password, callback) {
-		var loginData = null;
-		if ( getConfiguration().emailLogin ) {
-			if ( email ) {
-				loginData = { email: email, password: password };
-			}
-		} else {
-			if ( username ) {
-				loginData = { username: username, password: password };
-			}
-		}
-		if ( loginData ) {
-			utils.post('/o/user-accounts/sign-in', loginData, function(data) {
-				if (data.success) {
-					loggedInState = { loggedIn: true, user: data.user };
-				}
-				callback(data.success);
-			});
-		} else {
-			callback(false);
-		}
-	}
-	
-	/**Logs out current user. 
-	 * @memberof accounts
-	 * @param callback {accounts.logoutCallback}	A callback function for when the user has logged out. If the user has already logged out, this
-	 												will be called immediately.
-	   @param stayOnPage {boolean}					If true, the browser will stay on the current page and the callback will be triggered after the user has been logged out. 
-	   												Otherwise it will be immediately redirected to the default logout location*/
-	function logOut(callback, stayOnPage) {
-		if ( themeDisplay.isSignedIn() ) {
-			if (stayOnPage) {
-				utils.getHtml('/c/portal/logout', function() {
-					loggedInState = { loggedIn: false, user: null };
-					callback();
-				});
-			}
-			else {
-				window.open('/c/portal/logout', '_self');
-			}
-		} else {
-			callback();
-		}
-	}
-	
-	/**Updates current user's account, like changes the first name or password. 
-	 * @memberof accounts
-	 * @param info {accounts.UserInfo}					The settings to change. Only include the attributes you wish to update. To change the password, you
-	  													must include password, newPassword and newPasswordAgain. Must not contain id attribute.
-	 * @param callback {accounts.updateUserCallback}	A callback function for when the update is completed.
-	 */
-	function updateUser(info, callback) {
-		utils.post('/o/user-accounts/update-account', info, function(data) {
-			callback(data.success, data.errors);
-		});
-	}
-	
-	/**Creates new user's account, and if successful, logins that new user. It is highly recommended to reload the page after successful 
-	 * login, as rest of the page will be in invalid state.
-	 * @memberof accounts
-	 * @param info {accounts.UserInfo}					Settings for the new user account. Must not contain id or password attributes. 
-	 													Must contain newPassword, newPasswordAgain, firstName, and lastName attributes.
-	 													If login by email is enabled, must contains email attribute, otherwise must contain
-	 										 			username attribute.
-	 * @param callback {accounts.registerUserCallback}	A callback function for when the registration is completed.*/
-	function registerUser(info, callback) {
-		utils.post('/o/user-accounts/create-account', info, function(data) {
-			if (data.success) {
-				loggedInState = { loggedIn: true, user: data.user };
-			}
-			callback(data.success, data.errors);
-		});
-	}
-	
-	
-	/**Requests a password reset link to be sent to given email address.
-	 * @memberof accounts
-	 * @param email {string}							The email address to send the reset link. 
-	 * @param callback {accounts.resetLinkCallback}		A callback function for when the link has been sent.*/
-	function passwordRecovery(email, callback) {
-		utils.post('/o/user-accounts/password-recovery', {
-			email: email, lang: Cloubi.currentUser.languageId
-		}, function(data) {
-			callback();
-		});
-	} 
-	
-	
-	return {
-		getConfiguration: getConfiguration,
-		getUserInfo: getUserInfo,
-		isLoggedIn: isLoggedIn,
-		logIn: logIn,
-		logOut: logOut,
-		updateUser: updateUser,
-		registerUser: registerUser,
-		passwordRecovery: passwordRecovery
-	};
-
-});
-
-
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/notifications', ["./utils", "./dialog", "fi.cloubi.lib.js/offline", "fi.cloubi.lib.js/modernizr-custom", "fi.cloubi.lib.js/jquery-ui"], function(utils, dialogs) {	
-		
-	jQuery(document).ajaxError(function(event, jqxhr, settings, thrownError){
-				
-		if ( settings.skipReconnectCheck ) {
-			return;
-		}
-		
-		createReconnectNotification();
-								
-	});
-			
-	var cloubiOfflineCallbacks = [];
-	var customCloubiOfflineCallbacks = [];
-	var offlineCallbacks = [];
-	var customOfflineCallbacks = [];
-	var onlineCallbacks = [];
-	var customOnlineCallbacks = [];
-	var customReconnectCallbacks = [];
-	var reconnectCallbacks = [];
-	var smallScreenResolutionCallbacks = [];
-	var customSmallScreenResolutionCallbacks = [];
-	var slowConnectionCallbacks = [];	
-	var browserNotSupportedCallbacks = [];	
-	var customBrowserNotSupportedCallbacks = [];
-	
-	var smallScreenResolutionLimit = 480;
-
-	var googleUrl = 'https://www.google.fi/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png';
-	
-	//var url = window.location.origin + "/html/icons/default.png";			
-	/*
-	if ( window.location.hostname === "localhost" ) {
-		//url = "https://cloubi-frame-dev.ubilabs.fi/html/icons/default.png";
-	}
-	*/	
-	
-	/* SLOW CONNECTION SPEED 
-	function onSlowConnection(callback) {
-		slowConnectionCallbacks.push(callback);		
-	}	
-	
-	
-	var slowConnectionTimeout = setTimeout(function(){
-				
-		trigger(slowConnectionCallbacks);
-				
-	}, 1000);
-	
-	window.addEventListener( 'load', function() {
-		
-		try {
-            window.clearTimeout( slowConnectionTimeout );
-        } catch (e){
-        }
-
-    });
-	*/
-	
-	/* ONLINE/OFFLINE CHECK */
-	Offline.options = {
-		checkOnLoad: true,
-		interceptRequests: true,		
-		reconnect: { 
-			initialDelay: 3,
-			delay: 10
-		},		
-		checks: {	
-			image: {
-				url: googleUrl + "?_=" + ((new Date()).getTime())
-			},
-			active: 'image'
-		},
-		requests: false,
-		game: false		
-	}	
-	
-	Offline.on("confirmed-up", function(){			
-		
-		if ( window.navigator.onLine ) {
-			
-			if ( customOnlineCallbacks.length > 0 ) {
-				trigger(customOnlineCallbacks);
-			} else {
-				trigger(onlineCallbacks);
-			}
-			
-			changeImageUrl();
-			
-		} else {
-			
-			Offline.state = 'down;'
-			Offline.check();
-		
-		}
-		
-	});
-	
-	function setCheckOnLoad(value) {
-		Offline.options.checkOnLoad = value;
-	}
-	
-	function changeImageUrl() {		
-		Offline.options.checks.image['url'] = googleUrl + "?_=" + ((new Date()).getTime());
-	}	
-		
-	var timeOnDown = 0;	
-	function timeElapsed(ms) {
-				
-		return ms - timeOnDown;
-		
-	}
-	
-	function _trapFocusKeyup(ev){
-		if (ev.key === "Tab"){
-			var trap = jQuery(".cloubi-notifications-focus-trap");
-			if (!jQuery.contains(trap[0], document.activeElement)){
-				if (ev.shiftKey){
-					trap.find(":focusable").last().focus();
-				}
-				else {
-					trap.find(":focusable").first().focus();
-				}
-			}
-		}
-	}
-	
-	function _trapFocusKeydown(ev){
-		if (ev.key === "Tab"){
-			var trap = jQuery(".cloubi-notifications-focus-trap");
-			var focusables = trap.find(":focusable");
-			if (ev.shiftKey && focusables.first().is(jQuery(document.activeElement))){
-				focusables.last().focus();
-				ev.preventDefault();
-				ev.stopPropagation();
-			}
-			else if (!ev.shiftKey && focusables.last().is(jQuery(document.activeElement))){
-				focusables.first().focus();
-				ev.preventDefault();
-				ev.stopPropagation();
-			}
-			
-		}
-	}
-	
-	function _trapIframeFocus(){
-		jQuery(".cloubi-notifications-focus-trap :focusable").first().focus();
-	}
-	
-	function _setupFocusTrap(){
-		setTimeout(function(){
-			jQuery(".cloubi-notifications-focus-trap:visible :focusable").first().focus();
-		});
-		
-		jQuery(window).on("keydown", _trapFocusKeydown);
-		jQuery(window).on("keyup", _trapFocusKeyup);
-		var frames = jQuery("iframe");		
-		frames.each(function(index, elem){
-			var self = jQuery(elem);
-			self.attr("data-tabindex-cache", self.attr("tabindex"));
-			self.attr("tabindex", -1);
-		});
-	}
-	
-	function _teardownFocusTrap(){
-		jQuery(window).off("keydown", _trapFocusKeydown);
-		jQuery(window).off("keyup", _trapFocusKeyup);
-		var frames = jQuery("iframe");		
-		frames.each(function(index, elem){
-			var self = jQuery(elem);
-			if (elem.hasAttribute("data-tabindex-cache")){
-				self.attr("tabindex", self.attr("data-tabindex-cache"));
-			}
-			else {
-				self.removeAttr("tabindex");
-			}
-		});
-	}
-	
-	function createReconnectNotification() {
-		
-		if ( jQuery(".cloubi-notifications-reconnect-notification").length > 0 ) {
-			return;
-		}
-		
-		var curtain = jQuery("<div class='cloubi-notifications-reconnect-notification cloubi-notifications-focus-trap' tabindex='-1'></div>");
-		var text = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-reconnecting'));
-		curtain.append(text);
-		
-		if ( Offline.state == "down" && !window.navigator.onLine ) {
-			var spinner = jQuery("<span class='cloubi-notifications-reconnect-spinner'><i class='fa fa-5x fa-circle-o-notch fa-spin'></i></span>");
-		}
-		
-		curtain.append(spinner);
-		curtain.appendTo("body");
-		_setupFocusTrap();
-	}
-		
-	function removeReconnectNotification() {		
-		jQuery(".cloubi-notifications-reconnect-notification").remove();
-		_teardownFocusTrap();
-	}
-	
-	Offline.on("reconnect:started", function(){
-		createReconnectNotification();		
-	});
-	
-	Offline.on("reconnect:stopped", function(){		
-		removeReconnectNotification();
-	});
-		
-	Offline.on("reconnect:tick", function(){
-		
-		if ( customReconnectCallbacks.length > 0) {
-			trigger(customReconnectCallbacks);			
-		} else {
-			trigger(reconnectCallbacks);
-		}
-		
-	});
-
-	Offline.on("down", function(){	
-
-		timeOnDown = new Date().getTime();
-			
-		/*
-		if ( customOfflineCallbacks.length > 0 ) {
-			trigger(customOfflineCallbacks);
-		} else {
-			trigger(offlineCallbacks);
-		}
-		*/
-		
-	});
-	
-	function onReconnectTick(callback) {
-		
-		if ( callback ) {
-			customReconnectCallbacks.push(callback);			
-		} else {			
-			reconnectCallbacks.push(defaultOnReconnectTick);
-		}	
-
-	}
-	
-	function defaultOnReconnectTick() {
-		
-		console.log("reconnect:tick");
-				
-		var time = new Date();
-		
-		if ( timeElapsed(time.getTime()) > 15000 && Offline.state == "down" ) {
-			
-			removeReconnectNotification();
-			
-			if ( dialogs && !dialogs.getDialog('offlineDialog') ) {
-
-				if ( customOfflineCallbacks.length > 0 ) {
-					trigger(customOfflineCallbacks);
-				} else {
-					trigger(offlineCallbacks);
-				}
-				
-			} else {
-				
-				createNotificationByType('offline');
-				
-			}
-			
-		}
-	}
-			
-	function testCloubiConnection() {
-				
-		var server1NotFound = false;
-		var server2NotFound = false;
-		var img1 = new Image;
-		var img2 = new Image;
-		img1.onerror = function() {
-			server1NotFound = true;	
-		}
-		img2.onerror = function() {
-			server2NotFound = true;			
-		}
-		
-		img1.src = 'https://frame.otava.fi/html/icons/default.png';			
-		img2.src = 'https://digitehtavat.otava.fi/html/icons/default.png';
-		
-		setTimeout(function(){
-			
-			if ( server1NotFound || server2NotFound ) {
-				
-				if ( customCloubiOfflineCallbacks.length > 0 ) {
-					trigger(customCloubiOfflineCallbacks);
-				} else {
-					trigger(cloubiOfflineCallbacks);
-				}
-				
-			}
-			
-		}, 1000);
-			
-	}
-	
-	/*
-	Offline.on("reconnect:connecting", function(){
-		trigger(reconnectCallbacks);			
-	});
-	*/
-	
-	function defaultCloubiOfflineCallback() {
-						
-		var onlineDialog = dialogs.getDialog('onlineDialog');
-		if ( onlineDialog )
-			dialogs.closeDialog(onlineDialog);	
-		
-		var offlineDialog = dialogs.getDialog('offlineDialog');
-		if ( offlineDialog )
-			dialogs.closeDialog(offlineDialog);
-		
-		var dialog = dialogs.create(undefined, 'cloubiOfflineDialog');
-		dialogs.addCurtainClass("cloubi-notification-curtain");
-		dialogs.addClass("cloubi-default-notification cloubi-offline");
-				
-		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
-		var header = jQuery('<h3></h3>').text(Liferay.Language.get('cloubi-notification-connection-down-header'));
-		var paragraph1 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-1'));
-		var paragraph2 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-2'));
-		var paragraph3 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-3'));
-		wrapper.append(header).append(paragraph1).append(paragraph2).append(paragraph3);	
-		
-		var content = dialogs.getContentElem(dialog);		
-		content.empty().append(wrapper);
-				
-	}
-	
-	function onCloubiOffline(callback) {
-			
-		if ( callback ) {
-			customCloubiOfflineCallbacks.push(callback);							
-		} else {			
-			cloubiOfflineCallbacks.push(defaultCloubiOfflineCallback);			
-		}
-		
-	}
-					
-	function defaultOfflineCallback() {
-		
-		if ( dialogs ) {
-			
-			var onlineDialog = dialogs.getDialog('onlineDialog');
-			if ( onlineDialog )
-				dialogs.closeDialog(onlineDialog);	
-			
-			var cloubiOfflineDialog = dialogs.getDialog('cloubiOfflineDialog');
-			if ( cloubiOfflineDialog )
-				dialogs.closeDialog(cloubiOfflineDialog);
-			
-			var dialog = dialogs.create(undefined, 'offlineDialog');
-			dialogs.addCurtainClass(dialog, "cloubi-notification-curtain");
-			dialogs.addClass(dialog, "cloubi-default-notification offline");
-			
-			var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
-			var header = jQuery('<h3></h3>').text(Liferay.Language.get('cloubi-notification-connection-down-header'));
-			var paragraph1 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-1'));
-			var paragraph2 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-2'));
-			var paragraph3 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-3'));
-			wrapper.append(header).append(paragraph1).append(paragraph2).append(paragraph3);		
-			
-			var content = dialogs.getContentElem(dialog);		
-			content.attr("tabindex", "-1")
-			content.empty().append(wrapper);
-			content.focus();
-			
-		}
-		
-	}
-	
-	function onOffline(callback) {
-						
-		if ( callback ) {
-			customOfflineCallbacks.push(callback);						
-		} else {			
-			offlineCallbacks.push(defaultOfflineCallback);
-		}
-		
-	}
-	
-	function defaultOnlineCallback() {
-		
-		jQuery(".cloubi-default-notification.offline").closest(".cloubi-modal-dialog-curtain").remove();
-		
-		if ( Offline.state === "up" ) {
-			return;
-		}
-		
-		if ( dialogs ) {
-			
-			var cloubiOfflineDialog = dialogs.getDialog('cloubiOfflineDialog');			
-			if ( cloubiOfflineDialog )
-				dialogs.closeDialog(cloubiOfflineDialog);
-			
-			var offlineDialog = dialogs.getDialog('offlineDialog');
-			if ( offlineDialog )
-				dialogs.closeDialog(offlineDialog);
-			
-			var dialog = dialogs.create(undefined, 'onlineDialog');		
-			dialogs.addCurtainClass(dialog, "cloubi-notification-curtain");
-			dialogs.addClass(dialog, "cloubi-default-notification online");
-			var icon = jQuery("<div class='icon info'></div>");
-			var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
-			var header = jQuery('<h3></h3>').text(Liferay.Language.get('cloubi-notification-connection-up')); 
-			wrapper.append(icon).append(header);	
-			
-			var content = dialogs.getContentElem(dialog);	
-			content.attr("tabindex", "-1")
-			content.empty().append(wrapper);
-			content.focus();
-			
-			setTimeout(function(){
-				dialogs.closeDialog('onlineDialog');
-			}, 2000);
-			
-		} else {
-			
-			createNotificationByType('online');
-			
-			setTimeout(function(){
-				jQuery(".cloubi-default-notification.online").closest(".cloubi-modal-dialog-curtain").remove();
-			}, 2000);
-			
-		}		
-		
-	}
-	
-	function onOnline(callback) {
-		
-		if ( callback ) {
-			customOnlineCallbacks.push(callback);			
-		} else {
-			onlineCallbacks.push(defaultOnlineCallback);
-		}
-						
-	}
-	
-	/*
-	function onReconnect(callback) {
-		reconnectCallbacks.push(callback);		
-	}
-	*/
-	
-	
-	function createCross(dialog) {
-		
-		dialogs.createCross(dialog, function() {
-			hideDialog();
-			localStorage.setItem("cloubi-notification-dismiss", "true");
-		});
-		
-	}
-	
-	function createNotificationByType(type) {
-		
-		var dialogClass = ".cloubi-default-notification." + type;
-		
-		if ( jQuery(dialogClass).length > 0 ) {
-			return;
-		}
-		
-		var curtain = jQuery('<div class="cloubi-modal-dialog-curtain cloubi-notification-curtain"></div>');
-		var dialog = jQuery('<div class="cloubi-modal-dialog cloubi-default-notification"></div>');		
-		dialog.addClass(type);		
-		var header = jQuery('<div class="cloubi-modal-dialog-header"></div>');
-		var contentWrapper = jQuery('<div class="cloubi-modal-dialog-content-wrapper"></div>');
-		var content = jQuery('<div class="cloubi-modal-dialog-content"></div>');
-		var footer = jQuery('<div class="cloubi-modal-dialog-footer"></div>');
-		
-		curtain.append(dialog);
-
-		contentWrapper.append(content);
-		
-		dialog.append(header).append(contentWrapper).append(footer);
-		
-		if ( type == 'offline' ) {
-			var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
-			var header = jQuery('<h3></h3>').text(Liferay.Language.get('cloubi-notification-connection-down-header'));
-			var paragraph1 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-1'));
-			var paragraph2 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-2'));
-			var paragraph3 = jQuery("<p></p>").text(Liferay.Language.get('cloubi-notification-connection-down-info-3'));
-			wrapper.append(header).append(paragraph1).append(paragraph2).append(paragraph3);		
-		}
-		
-		if ( type == 'online' ) {
-			var icon = jQuery("<div class='icon info'></div>");
-			var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
-			var header = jQuery('<h3></h3>').text(Liferay.Language.get('cloubi-notification-connection-up')); 
-			wrapper.append(icon).append(header);	
-		}
-		
-		content.append(wrapper);
-		
-		curtain.appendTo('body');
-		
-	}
-	
-	function createNotification() {
-		
-		var dialog = dialogs.create(undefined, 'notificationDialog');
-		dialogs.addCurtainClass(dialog, "cloubi-notification-curtain");
-		dialogs.addCurtainClass(dialog, "cloubi-notifications-focus-trap");
-		dialogs.addClass(dialog, "cloubi-default-notification");
-		
-		dialogs.createButton(dialog, function() {
-			hideDialog();				
-			localStorage.setItem("cloubi-notification-dismiss", "true");
-		}, Liferay.Language.get('cloubi-dialog-close'));
-		
-		var content = dialogs.getContentElem(dialog);
-		if (dialog.curtain){
-			dialog.curtain.attr("role", "alertdialog");
-			dialog.curtain.attr("aria-labelledby", "cloubi-notifications-dialog-header");
-			dialog.curtain.attr("aria-describedby", "cloubi-notifications-dialog-message");
-		}
-		_setupFocusTrap();
-		
-		return dialog;
-	}
-	
-	function createMessage(dialog, header, text, showIcon, addClasses) {
-		
-		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
-		
-		if ( addClasses ) {
-			wrapper.addClass(addClasses);
-		}
-		
-		var icon = jQuery("<div class='icon warning'></div>");
-		var header = jQuery('<h3 id="cloubi-notifications-dialog-header"></h3>').text(header); 
-		var paragraph = jQuery('<p id="cloubi-notifications-dialog-message"></p>').text(text);
-		
-		if ( showIcon ) {
-			wrapper.append(icon);
-		}
-		
-		wrapper.append(header).append(paragraph);
-		
-		var content = dialogs.getContentElem(dialog);		
-		content.empty().append(wrapper);
-		
-	}
-	
-	function setSmallScreenResolutionLimit(limit) {
-		smallScreenResolutionLimit = limit;
-	}
-	
-	function getSmallScreenResolutionLimit() {
-		return smallScreenResolutionLimit;
-	}
-	
-	function defaultOnSmallScreenResolutionCallback() {
-				
-		if ( jQuery(window).width() < getSmallScreenResolutionLimit() ) {
-			
-			if ( jQuery(".cloubi-default-notification").length == 0 ) {
-				
-				var dialog = createNotification();
-				
-				createMessage(dialog, Liferay.Language.get('cloubi-notification-screen-resolution-too-small-header'), Liferay.Language.get('cloubi-notification-screen-resolution-too-small-info'), true, "small-screen-message");
-				
-				createCross(dialog);
-				
-				if ( jQuery(".cloubi-default-small-notification").length == 0 )						
-					createSmallNotification();				
-
-				if ( jQuery(".cloubi-default-notification").length > 1 || localStorage.getItem("cloubi-notification-dismiss") === "true") {
-					hideDialog();
-				}
-				
-			} else if ( jQuery(".small-screen-message").length == 0 ) {
-							
-				var dialog = dialogs && dialogs.getDialog('notificationDialog') ? dialogs.getDialog('notificationDialog') : createNotification();
-				createMessage(dialog, Liferay.Language.get('cloubi-notification-screen-resolution-too-small-header'), Liferay.Language.get('cloubi-notification-screen-resolution-too-small-info'), false, "small-screen-message");
-
-			}
-							
-		} else {
-			
-			jQuery(".small-screen-message").remove();
-			
-			var dialog = dialogs && dialogs.getDialog('notificationDialog') ? dialogs.getDialog('notificationDialog') : null;
-			
-			if ( dialog ) {
-				
-				if ( !isUnsupportedBrowser() ) {
-					
-					dialogs.closeDialog(dialog);
-					removeSmallNotification();
-					localStorage.removeItem("cloubi-notification-dismiss");
-					
-				}
-				
-			}
-			
-		} 	
-		
-	}
-	
-	function hideDialog() {		
-		jQuery(".cloubi-default-notification").closest(".cloubi-modal-dialog-curtain").hide();
-		_teardownFocusTrap();
-	}
-	
-	function removeSmallNotification() {		
-		jQuery(".cloubi-default-small-notification").remove();		
-	}
-		
-	function showDialog() {	
-		var dialog = jQuery(".cloubi-default-notification").closest(".cloubi-modal-dialog-curtain")
-		dialog.show();
-		_setupFocusTrap();
-	}
-	
-	function createSmallNotification() {
-
-		var notification = jQuery("<div></div>").attr("class", "cloubi-default-small-notification").attr("tabindex", "0").attr("role", "alert")
-			.attr("aria-labelledby", "cloubi-notifications-dialog-header")
-			.attr("aria-describedby", "cloubi-notifications-dialog-message");
-		var icon = jQuery("<div class='icon warning'></div>");
-		notification.append(icon);
-		
-		notification.click(function(){	
-			showDialog();
-		});
-		notification.on("keydown", function(ev){
-			if (ev.key === " " || ev.key === "Spacebar" || ev.key === "Enter"){
-				showDialog();
-			}
-		});
-				
-		notification.appendTo(jQuery("body"));
-						
-	}
-	
-	window.addEventListener("resize", utils.debounce(function() {
-		if ( customSmallScreenResolutionCallbacks.length > 0 ) {
-			trigger(customSmallScreenResolutionCallbacks);
-		} else {
-			trigger(smallScreenResolutionCallbacks);
-		}	
-	}, 500));
-			
-	window.addEventListener("resize", function(){
-		
-		setSmallNotificationPosition();
-		
-	});	
-		
-	function onSmallScreenResolution(callback) {
-		
-		if ( callback ) {
-			customSmallScreenResolutionCallbacks.push(callback);			
-		} else {			
-			smallScreenResolutionCallbacks.push(defaultOnSmallScreenResolutionCallback);
-		}		
-						
-	}
-				
-	function isUnsupportedBrowser() {
-		
-		if ( !Modernizr.csscalc || !Modernizr.cssremunit) {
-			return true;
-		}
-		
-		return false;
-		
-	}
-	
-	/* BROWSER NOT SUPPORTED */
-	function defaultBrowserNotSupportedCallback() {
-		
-		if ( isUnsupportedBrowser() ) {
-					
-			if ( jQuery(".cloubi-default-notification").length == 0 ) {
-				
-				var dialog = createNotification();
-				
-				createMessage(dialog, Liferay.Language.get('cloubi-notification-browser-not-supported-header'), Liferay.Language.get('cloubi-notification-browser-not-supported-info'), true);
-
-				createCross(dialog);
-				
-				if ( jQuery(".cloubi-default-small-notification").length == 0 )	
-					createSmallNotification();
-				 
-				if ( jQuery(".cloubi-default-notification").length > 1 || localStorage.getItem("cloubi-notification-dismiss") === "true" ) {
-					hideDialog();
-				}
-				
-			} else {
-				
-				var dialog = dialogs.getDialog('notificationDialog');
-				
-				createMessage(dialog, Liferay.Language.get('cloubi-notification-browser-not-supported-header'), Liferay.Language.get('cloubi-notification-browser-not-supported-info'), false);
-												
-			}
-			
-		} 
-		
-	}
-			
-	window.addEventListener("load", function(){		
-		
-		//testCloubiConnection();
-		
-		if ( customBrowserNotSupportedCallbacks.length > 0 ) {
-			trigger(customBrowserNotSupportedCallbacks);	
-		} else {
-			trigger(browserNotSupportedCallbacks);	
-		}	
-		
-		if ( customSmallScreenResolutionCallbacks.length > 0 ) {
-			trigger(customSmallScreenResolutionCallbacks);	
-		} else {
-			trigger(smallScreenResolutionCallbacks);	
-		}
-		
-		setSmallNotificationPosition();
-				
-	});
-		
-	function onBrowserNotSupported(callback) {
-		
-		if ( callback ) {
-			customBrowserNotSupportedCallbacks.push(callback);			
-		} else {			
-			browserNotSupportedCallbacks.push(defaultBrowserNotSupportedCallback);
-		}		
-						
-	}	
-	
-	function trigger(callbacks) {		
-		jQuery.each(callbacks, function(i, func){			
-			func();	
-		});
-	}
-		
-	function setSmallNotificationPosition(){
-		
-		var topBarHeight = jQuery("#frame-top-bar").height();
-		jQuery(".cloubi-default-small-notification").css("top", topBarHeight + 15);	
-		
-	}
-			
-	return {		
-		onCloubiOffline: onCloubiOffline,
-		onOffline: onOffline,
-		onOnline: onOnline,
-		onSmallScreenResolution: onSmallScreenResolution,
-		onBrowserNotSupported: onBrowserNotSupported,
-		hideDialog: hideDialog,
-		createCross: createCross,
-		createMessage: createMessage,
-		createNotification: createNotification,
-		createSmallNotification: createSmallNotification,
-		removeSmallNotification: removeSmallNotification,
-		isUnsupportedBrowser: isUnsupportedBrowser,
-		setSmallScreenResolutionLimit: setSmallScreenResolutionLimit,
-		getSmallScreenResolutionLimit: getSmallScreenResolutionLimit,
-		messages: {
-			screenResolutionTooSmallHeader: Liferay.Language.get('cloubi-notification-screen-resolution-too-small-header'),
-			screenResolutionTooSmallInfo: Liferay.Language.get('cloubi-notification-screen-resolution-too-small-info')
-		},
-		onReconnectTick: onReconnectTick,
-		setNeedForOnlineCheck: setCheckOnLoad
-		
-		/*onReconnect: onReconnect,		
-		onSlowConnection: onSlowConnection*/
-	};
-
-});
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/dialog', ['./utils'], function(utils) {
-
-	var dialogMap = {};
-	var resizeListenerCreated = false;
-
-	function postActionAndPollUntilReady(dialog, actionUrl, pollUrl, data, callback) {
-
-		callback = callback || utils.reload;
-
-		loading(dialog);
-
-		utils.post(actionUrl, data, function() {
-
-			utils.pollUntilReady(pollUrl, callback, function(progressInformation) {
-
-				loadingStatus(dialog, progressInformation);
-
-			});
-
-		});
-
-	}
-
-	function loading(dialog, keep) {
-
-		dialog = resolveDialog(dialog);
-
-		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
-
-		dialog.dialog.find('.cloubi-modal-dialog-footer input').attr("disabled", "disabled");
-
-		if ( keep ) {
-			dialog.dialog.find('.cloubi-modal-dialog-content').hide();
-			dialog.dialog.find('.cloubi-modal-dialog-content-wrapper').append(loadingAnimation);
-		} else {
-			dialog.dialog.find('.cloubi-modal-dialog-content').empty().append(loadingAnimation);
-		}
-
-	}
-
-	function removeLoading(dialog) {
-
-		dialog = resolveDialog(dialog);
-
-		dialog.dialog.find('.cloubi-modal-dialog-footer input').removeAttr("disabled");
-
-		dialog.dialog.find('.cloubi-modal-dialog-content').show();
-
-		dialog.dialog.find('.cloubi-modal-dialog-loading-animation').remove();
-
-	}
-
-	function loadingStatus(dialog, data) {
-
-		dialog = resolveDialog(dialog);
-
-		var statusText = dialog.dialog.find(".cloubi-modal-dialog-status-text");
-
-		if ( statusText.length == 0 ) {
-
-			statusText = jQuery('<div class="cloubi-modal-dialog-status-text"></div>');
-
-			dialog.dialog.find('.cloubi-modal-dialog-content').append(statusText);
-
-		}
-
-		var text = "";
-
-		if ( data.percent ) {
-			text = data.percent + "% " + Liferay.Language.get('cloubi-dialog-percent-complete');
-		} else {
-			text = Liferay.Language.get('cloubi-dialog-job-is-running');
-		}
-
-		statusText.text(text);
-
-	}
-
-	function clearFooter(dialog) {
-
-		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
-
-		footer.empty();
-
-	}
-
-	function createButton(dialog, callback, text, extraClass, saveDisabled) {
-
-		var button = jQuery('<input type="button" class="btn btn-primary" value="" />');
-
-		if ( extraClass ) {
-			button.addClass(extraClass);
-		}
-
-		button.attr("value", text);
-
-		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
-
-		if ( callback ) {
-			button.click(function() {
-				callback(dialog);
-			});
-		}
-
-		footer.append(button);
-
-		if ( text === Liferay.Language.get('cloubi-dialog-save') && saveDisabled ) {
-			setSaveEnabled(dialog, false);
-		}
-
-	}
-
-	function createButtons(dialog, callback, saveText, cancelText, saveDisabled) {
-
-		clearFooter(dialog);
-
-		createButton(dialog, callback, saveText, "save-button", saveDisabled);
-
-		createButton(dialog, function() {
-			closeDialog(dialog);
-		}, cancelText, "cancel-button");
-
-	}
-
-	function closeDialog(dialog) {
-
-		dialog = resolveDialog(dialog);
-
-		if ( dialog.closeCallback ) {
-			dialog.closeCallback();
-		}
-
-		dialog.curtain.remove();
-
-		dialogMap[dialog.name] = null;
-
-	}
-
-	function resolveDialog(dialog) {
-
-		if ( jQuery.type(dialog) === "string" ) {
-			return dialogMap[dialog];
-		} else {
-			return dialog;
-		}
-
-	}
-
-	function getDialog(name) {
-
-		return dialogMap[name];
-
-	}
-
-	function setDialogHeader(dialog, title) {
-
-		if ( title ) {
-
-			var header = dialog.dialog.find(".cloubi-modal-dialog-header");
-
-			header.text(title);
-
-		}
-
-	}
-
-	function saveOnly(dialog, callback, title, saveDisabled) {
-
-		dialog = resolveDialog(dialog);
-
-		clearFooter(dialog);
-
-		createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-save'), "save-button", saveDisabled);
-
-		setDialogHeader(dialog, title);
-
-	}
-
-	function saveAndCancel(dialog, callback, title, saveDisabled) {
-
-		dialog = resolveDialog(dialog);
-
-		createButtons(dialog, callback,
-				Liferay.Language.get('cloubi-dialog-save'),
-				Liferay.Language.get('cloubi-dialog-cancel'), saveDisabled);
-
-		setDialogHeader(dialog, title);
-
-	}
-
-	function setSaveEnabled(dialog, enabled) {
-
-		dialog = resolveDialog(dialog);
-
-		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
-		var button = footer.find(".save-button");
-
-		button.prop( "disabled", !enabled );
-
-	}
-
-	function yesAndNo(dialog, callback, title) {
-
-		dialog = resolveDialog(dialog);
-
-		createButtons(dialog, callback,
-				Liferay.Language.get('cloubi-dialog-yes'),
-				Liferay.Language.get('cloubi-dialog-no'));
-
-		setDialogHeader(dialog, title);
-
-	}
-
-	function closeOnly(dialog, title, callback) {
-
-		dialog = resolveDialog(dialog);
-
-		clearFooter(dialog);
-
-		if ( callback ) {
-			createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-close'));
-		} else {
-			createButton(dialog, function() {
-				dialog.curtain.remove();
-			}, Liferay.Language.get('cloubi-dialog-close'));
-		}
-
-		setDialogHeader(dialog, title);
-
-	}
-
-	/** Creates a dialog with a save button and a cross button that closes the dialog without saving
-	 * dialog 	A string identifying the dialog
-	 * callback	The callback function that is called when the dialog is saved
-	 * title	The title of the dialog
-	 * Any functions pushed to the dialog's closeListeners array will be executed when the dialog is closed with the cross button*/
-	function saveAndCross(dialog, callback, title) {
-
-		dialog = resolveDialog(dialog);
-
-		clearFooter(dialog);
-
-		createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-save'), 'save-button');
-
-		setDialogHeader(dialog, title);
-
-		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
-
-		cross.click( function() {
-			//Call the close listeners and then close the dialog
-			if (dialog.closeListeners && dialog.closeListeners.forEach){
-				dialog.closeListeners.forEach(function (elem){
-					elem();
-				});
-			}
-			dialog.curtain.remove();
-		});
-
-		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
-
-		header.append(cross);
-
-	}
-	
-	function createCross(dialog, callback){
-		dialog = resolveDialog(dialog);
-		
-		//Create the cross
-		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
-
-		//When the cross is clicked, execute the callback or just close
-		cross.click( function() {
-			if (callback){
-				callback();
-			}
-			else {
-				dialog.curtain.remove();
-			}
-		});
-
-		//Add the cross to header
-		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
-		header.append(cross);
-	}
-
-	/**Configures dialog with a header with a cross in the upper right corner and no footer
-	 * @param dialog	The name of the dialog to configure
-	 * @param title		The dialog title to display in the header
-	 * @param callback	A function to call when the cross is clicked, before the dialog closes*/
-	function crossOnly(dialog, title, callback) {
-
-		//Get dialog object
-		dialog = resolveDialog(dialog);
-
-		//Empty and hide footer
-		clearFooter(dialog);
-		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
-		footer.hide();
-
-		//Set dialog title
-		setDialogHeader(dialog, title);
-
-		//Create the cross
-		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
-
-		//When the cross is clicked, execute the callback and close
-		cross.click( function() {
-			if (callback){
-				callback();
-			}
-			dialog.curtain.remove();
-		});
-
-		//Add the cross to header
-		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
-		header.append(cross);
-
-	}
-
-	function crossOnlyWithOptions(dialog,title,options,callback) {
-		//Get dialog object
-		dialog = resolveDialog(dialog);
-
-		//Empty and hide footer
-		clearFooter(dialog);
-		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
-		footer.hide();
-
-		//Set dialog title
-		setDialogHeader(dialog, title);
-
-		//Create the cross
-		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
-
-		if (options && options.crossText) {
-			var crossText = jQuery('<span class="cloubi-modal-dialog-cross-text"></span>');
-			crossText.text(options.crossText);
-		}
-
-		cross.prepend(crossText);
-
-		//When the cross is clicked, execute the callback and close
-		cross.click( function() {
-			if (callback){
-				callback();
-			}
-			dialog.curtain.remove();
-		});
-
-		//Add the cross to header
-		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
-		header.append(cross);
-	}
-
-	function confirm(message, yesCallback, noCallback) {
-
-		var dialog = create(undefined, 'confirmDialog');
-
-		yesAndNo(dialog, function() {
-			closeDialog(dialog);
-			yesCallback();
-		}, Liferay.Language.get('cloubi-dialog-confirm-dialog-title'));
-
-		dialog.closeCallback = noCallback;
-
-		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
-
-		wrapper.text(message);
-
-		var content = dialog.dialog.find(".cloubi-modal-dialog-content");
-
-		content.append(wrapper);
-
-	}
-
-	function info(message, html, callback) {
-
-		var dialog = create(undefined, 'infoDialog');
-
-		closeOnly(dialog, Liferay.Language.get('cloubi-dialog-info-dialog-title'), callback);
-
-		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
-
-		if ( html ) {
-			wrapper.html(message);
-		} else {
-			wrapper.text(message);
-		}
-
-		var content = dialog.dialog.find(".cloubi-modal-dialog-content");
-
-		content.append(wrapper);
-
-	}
-
-	function resize() {
-
-		var height = jQuery(window).innerHeight() - 200;
-
-		jQuery(".cloubi-modal-dialog-content-wrapper").css("max-height", height + "px");
-
-	}
-
-	function initResize() {
-
-		if ( !resizeListenerCreated ) {
-
-			resizeListenerCreated = true;
-
-			jQuery(window).resize(resize);
-
-		}
-
-		resize();
-
-	}
-
-	function waiting(name) {
-
-		var curtain = jQuery('<div class="cloubi-modal-dialog-curtain cloubi-modal-dialog-old"></div>');
-		var dialog = jQuery('<div class="cloubi-modal-dialog"></div>');
-		var contentWrapper = jQuery('<div class="cloubi-modal-dialog-content-wrapper"></div>');
-		var content = jQuery('<div class="cloubi-modal-dialog-content"></div>');
-		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
-
-		curtain.append(dialog);
-
-		contentWrapper.append(content);
-
-		dialog.append(contentWrapper);
-
-		curtain.appendTo('body');
-
-		loadingAnimation.appendTo(content);
-
-		var dialogData = {
-			dialog: dialog,
-			curtain: curtain,
-			name: name
-		};
-
-		if ( name ) {
-			dialogMap[name] = dialogData;
-		}
-
-		initResize();
-
-		return dialogData;
-
-	}
-
-	/**Creates a new modal dialog
-	 * @param url		The url used to get the contents of the dialog
-	 * @param name		The name used to identify the dialog
-	 * @param optional	(optional)
-	 * @param parent	(optional) A jQuery element to which the dialog is appended.
-	 * 					If not specified, the dialog will be appended to body.*/
-	function create(url, name, optional, parent) {
-		//Create the HTML elements of the dialog
-		var curtain = jQuery('<div class="cloubi-modal-dialog-curtain cloubi-modal-dialog-old"></div>');
-		var dialog = jQuery('<div class="cloubi-modal-dialog"></div>');
-		var header = jQuery('<div class="cloubi-modal-dialog-header"></div>');
-		var contentWrapper = jQuery('<div class="cloubi-modal-dialog-content-wrapper"></div>');
-		var content = jQuery('<div class="cloubi-modal-dialog-content"></div>');
-		var footer = jQuery('<div class="cloubi-modal-dialog-footer"></div>');
-		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
-
-		//Nest the created elements
-		curtain.append(dialog);
-
-		contentWrapper.append(content);
-
-		dialog.append(header).append(contentWrapper).append(footer);
-
-		//If a parent element was supplied, append the dialog to it, otherwise append the dialog to the document body
-		if (parent){
-			curtain.appendTo(parent);
-		}
-		else {
-			curtain.appendTo('body');
-		}
-
-		//Load the content HTML from the supplied url
-		if ( url ) {
-			loadingAnimation.appendTo(content);
-			//Do html POST request if the url parameter looks like an object
-			if ( url.post && url.url && url.data ) {
-				utils.post(url.url, url.data, function(html) {
-					content.html(html);
-				}, undefined, 'html');
-			} else {
-				content.load(url);
-			}
-		}
-
-		var dialogData = {
-			dialog: dialog,
-			curtain: curtain,
-			name: name,
-			url: url,
-			optional: optional
-		};
-
-		//Save the dialog object locally so that it can be referenced from inside the dialog
-		if ( name ) {
-			dialogMap[name] = dialogData;
-		}
-
-		initResize();
-
-		return dialogData;
-
-	}
-
-	function reloadDialog(dialog) {
-
-		dialog = resolveDialog(dialog);
-
-		if ( dialog.url ) {
-
-			clearFooter(dialog);
-
-			var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
-
-			var content = dialog.dialog.find(".cloubi-modal-dialog-content");
-
-			content.empty().append(loadingAnimation).load(dialog.url);
-
-		}
-
-	}
-
-
-	function forceSize(dialog, width, height) {
-
-		dialog = resolveDialog(dialog);
-
-		var container = dialog.dialog;
-		var wrapper = container.find(".cloubi-modal-dialog-content-wrapper");
-
-		wrapper.css("height", height + "px");
-		container.css("width", width + "%");
-
-	}
-
-	/**Maximizes the size of a dialog, making it take up as much size as it needs (up to window size -100 on both axes)
-	 * @param dialog	The name of the dialog*/
-	function maximize(dialog) {
-		dialog = resolveDialog(dialog);
-
-		var container = dialog.dialog;
-		var wrapper = container.find(".cloubi-modal-dialog-content-wrapper");
-
-		//calculate maximum size
-		var height = window.innerHeight - 200;
-		var width = window.innerWidth - 200;
-
-		//maximize the dialog
-		wrapper.css("max-height", height + "px");
-		container.css("max-width", width + "px");
-	}
-
-	function showErrorMessage(elem, text) {
-		var parent = elem.parent();
-		var wrapper = parent.find(".alert.alert-danger");
-
-		if (wrapper.length == 0) {
-			wrapper = jQuery("<div class='alert alert-danger'></div>");
-			parent.prepend(wrapper);
-		}
-
-		wrapper.text(text);
-	}
-
-	function removeErrorMessage(elem) {
-
-		if ( elem != undefined && elem != null ) {
-			elem.parent().find(".alert-danger").remove();
-		}
-
-	}
-
-	function addClass(dialog, className) {
-
-		dialog = resolveDialog(dialog);
-
-		dialog.dialog.addClass(className);
-
-	}
-
-	function addCurtainClass(dialog, className) {
-		
-		dialog = resolveDialog(dialog);
-		
-		dialog.curtain.addClass(className);
-		
-	}
-	
-	function getContentElem(dialog){
-		dialog = resolveDialog(dialog);
-		return dialog.curtain.find(".cloubi-modal-dialog-content");
-	}
-	
-	function showLargeStaticContent(contentType, content, title, desc) {
-
-		var popup = jQuery('<div class="cloubi-large-content-popup"></div>');
-		var close = jQuery('<div class="cloubi-large-content-popup-close">X</div>');
-		var contentElem = jQuery('<div class="cloubi-large-content-popup-content"></div>');
-		var wrapper = jQuery('<div class="cloubi-large-content-wrapper"></div>');
-
-		wrapper.append(close);
-
-		var closeCallback = function() { popup.remove(); jQuery(window).off('.largecontent'); };
-		var ignoreCallback = function(e) { e.stopPropagation(); };
-
-		if ( contentType == 'image' ) {
-
-			if ( title ) {
-				var titleElem = jQuery('<div class="cloubi-large-content-popup-content-title"></div>');
-				titleElem.text(title).appendTo(contentElem);
-				titleElem.click(ignoreCallback);
-			}
-
-			var image = jQuery('<img class="cloubi-large-content-image" />');
-			image.attr("src", content);
-			image.appendTo(wrapper);
-			image.click(ignoreCallback);
-
-			if ( desc ) {
-				var descElem = jQuery('<div class="cloubi-large-content-popup-content-desc"></div>');
-				descElem.text(desc).appendTo(contentElem);
-				descElem.click(ignoreCallback);
-			}
-
-			var adjustSize = function() {
-
-				var margin = 40;
-				if (window.innerWidth < 768) {
-					margin = 10;
-				}
-
-				image.css("max-height", popup.height() - margin);
-				image.css("max-width", popup.width() - margin);
-			}
-
-			setTimeout(adjustSize, 100);
-
-			jQuery(window).on('resize.largecontent', adjustSize);
-
-		} else if ( contentType == 'html' ) {
-
-			contentElem.html(content);
-
-		}
-
-		close.click(closeCallback);
-		popup.click(closeCallback);
-
-		contentElem.append(wrapper);
-		popup.append(contentElem).appendTo("body");
-
-	}
-
-	return {
-		create: create,
-		saveAndCancel: saveAndCancel,
-		saveOnly: saveOnly,
-		yesAndNo: yesAndNo,
-		closeOnly: closeOnly,
-		saveAndCross: saveAndCross,
-		crossOnly: crossOnly,
-		crossOnlyWithOptions: crossOnlyWithOptions,
-		loading: loading,
-		removeLoading: removeLoading,
-		getDialog: getDialog,
-		forceSize: forceSize,
-		maximize: maximize,
-		closeDialog: closeDialog,
-		waiting: waiting,
-		setSaveEnabled: setSaveEnabled,
-		showErrorMessage: showErrorMessage,
-		removeErrorMessage: removeErrorMessage,
-		loadingStatus: loadingStatus,
-		postActionAndPollUntilReady: postActionAndPollUntilReady,
-		confirm: confirm,
-		info: info,
-		reloadDialog: reloadDialog,
-		addClass: addClass,
-		addCurtainClass: addCurtainClass,
-		createButton: createButton,
-		createCross: createCross,
-		setDialogHeader: setDialogHeader,
-		showLargeStaticContent: showLargeStaticContent,
-		getContentElem: getContentElem
-	};
-
-});
-
-
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/additional-content', ['./utils', './material'], function(utils, material) {
-	
-	/**Contains functions for listing and accessing additional content for material pages. To use this API, load it like this:
-	 
-	 <pre><code>
-	require(['fi.cloubi.frontend/additional-content'], function(ac) {
-		ac.getContents(function(response) {
-			console.log(response);
-		});
-	});
-	 </code></pre>
-	 
-	 Usage:<br><br>
-	 Calling getContents() will return a response with several objects: a files object with all the {@link additionalcontent.Content} files
-	 on the page and two content folders (generally displayed as tabs). Each folder has a list of file IDs inside that folder - these are the
-	 contents that should be displayed when that folder/tab is selected. Each file may be a folder containing files itself, in which case the
-	 IDs are included in that file's additionalContent array. Note that these references may be cyclical (a file may indirectly contain itself),
-	 so the entire folder structure should never be displayed at once.<br>
-	 Files with the popupRenderable flag set to true can be loaded inline into Cloubi by loading the file's contentUrl and inserting the response
-	 HTML into the DOM. Note that when doing this, any script tags in the response MUST be preserved and executed, such as when using jQuery.load().
-	 If a file has a contentUrl but it is not popupRenderable, the contentUrl should be treated as an external link that should be opened 
-	 in a new tab when the file is opened. If a file has the downloadable flag set to true, it can be downloaded by calling getDownloadLink()
-	 with its ID and then opening the response URL as a download link.
-	 <br><br>
-	 
-	 Playlist integration:<br><br>
-	 When the page has loaded, any additional content UI should check if Cloubi.additionalContent.initialContent exists and if so,
-	 attempt to display that content. Note that the content may be some other user's user content that is not included in the list of
-	 all contents received from getContents(), in which case it must be loaded separately with getSingleContent().
-	 <br><br>
-	 To get notified when a playlist changes to an additional content item, listen to page changes like this:
-	 <pre><code>
-	 material.onPageChange(function (page, options, data){
-		//If the page change data has a related content ID, show the related content with that ID
-		if (data.relatedContentId){
-			ac.getSingleContent(data.relatedContentId, data.playlistId, function(response){
-				if (response.success){
-					var contentData = response.files[data.relatedContentId];
-					//Display the content represented by contentData here
-				}
-			});
-		}
-	 });
-	 </code></pre>
-	 
-	 * @namespace additionalcontent */
-	
-	/**Represents an individual piece of additional content
-	 * @memberof additionalcontent
-	 * @typedef {Object} Content
-	 * @property {string[]} additionalContent	An array containing the IDs of any sub-content nested inside this content
-	 * @property {string} contentType			The MIME content type of this content
-	 * @property {string} [contentUrl]			An URL that can be loaded to render the file contents of this content inside Cloubi
-	 * @property {string} description			The description of the content
-	 * @property {boolean} editable				If true, the user can edit the title of this file
-	 * @property {string} id					The unique ID of this content
-	 * @property {boolean} playlistEnabled		If true, the user can add this content to a playlist
-	 * @property {boolean} popupRenderable		True if this content can be rendered by loading the content URL in a modal dialog
-	 * @property {string} title					The name of this file
-	 * @property {string} typeName				The human-readable name of this file's data type
-	 * @property {boolean} downloadable			If true, this content can be downloaded by getting the download URL with {@link additionalcontent.getDownloadLink}*/
-	
-	/**Represents a root content folder
-	 * @memberof additionalcontent
-	 * @typedef {Object} ContentFolder
-	 * @property {string[]} additionalContent	An array containing the IDs of any content contained inside this folder
-	 * @property {boolean} canAdd				True if the user can upload files into this content folder
-	 * @property {number} [maxSize]				The maximum size of files (in bytes) that can be uploaded into this folder if 
-	 * 											this folder supports uploading*/
-	
-	/**A server response object
-	 * @memberof additionalcontent
-	 * @mixin
-	 * @typedef {Object} Response
-	 * @property {boolean} success		True if the request was successful
-	 * @property {string[]} [errors]	An array of errors that were encountered while processing the request*/
-	
-	/**A callback that receives all content on a page
-	 * @memberof additionalcontent
-	 * @callback AllContentCallback
-	 * @param {additionalcontent.Response} response							The server response
-	 * @param {Object.<string, additionalcontent.Content>} [response.files]	An object mapping content IDs to Content objects
-	 * @param {additionalcontent.ContentFolder} [response.libraryFiles]		The library additional content on the page
-	 * @param {additionalcontent.ContentFolder} [response.userFiles]		The user additional content on the page*/
-	
-	/**A callback that receives content that was specifically requested
-	 * @memberof additionalcontent
-	 * @callback ContentCallback
-	 * @param {additionalcontent.Response} response							The server response
-	 * @param {Object.<string, additionalcontent.Content>} [response.files]	An object mapping content IDs to Content objects*/
-	
-	/**A callback that receives a content download URL
-	 * @memberof additionalcontent
-	 * @callback URLCallback
-	 * @param {additionalcontent.Response} response		The server response
-	 * @param {string} [response.downloadUrl]			The requested URL*/
-	
-	/**A generic callback that receives information about an operation's success or failure
-	 * @memberof additionalcontent
-	 * @callback GenericCallback
-	 * @param {additionalcontent.Response} response	The server response*/
-	
-	/**The native JS File type
-	 * @external File
-	 * @see {@link https://developer.mozilla.org/en-US/docs/Web/API/File|File}*/
-	
-	/**Servlet address*/
-	var ENDPOINT = "/o/related-content/";
-	/**Material ID parameter*/
-	var PARAM_MATERIAL_ID = "materialId";
-	/**Page ID parameter*/
-	var PARAM_PAGE_ID = "pageId";
-	/**Content ID parameter*/
-	var PARAM_CONTENT_ID = "fileId";
-	/**Playlist ID parameter*/
-	var PARAM_PLAYLIST_ID = "playlistId";
-	/**File name parameter*/
-	var PARAM_FILENAME = "fileName";
-	
-	/**Loads all additional content for a given material page.
-	 * <br>Can produce the following errors:
-	 * <ul>
-	 * <li><b>no-such-material</b> if the requested material ID does not match any available material
-	 * <li><b>no-such-page</b> if the requested page ID does not match any valid page
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {additionalcontent.AllContentCallback} [callback]	A callback to receive the data
-	 * @param {string} [requestedMaterial=current material id]	The requested material ID of the material containing the page
-	 * @param {string} [pageId=current page id]					The ID of the page whose additional content should be retrieved*/
-	function getContents(callback, requestedMaterial, pageId){
-		var data = {};
-		data[PARAM_MATERIAL_ID] = requestedMaterial || material.getRequestedMaterial();
-		data[PARAM_PAGE_ID] = pageId || material.getCurrentPageId();
-		utils.post(ENDPOINT + "contents", data, callback);
-	}
-	
-	/**Gets the data of an individual additional content file.
-	 * <br>Can produce the following errors:
-	 * <ul>
-	 * <li><b>content-not-available</b> if the requested content ID does not match any available content
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {string} contentId								The ID of the content to get
-	 * @param {string} [playlistId]								The ID of the currently active playlist if any
-	 * @param {additionalcontent.ContentCallback} [callback]	A callback to receive the result*/
-	function getSingleContent(contentId, playlistId, callback){
-		var data = {};
-		data[PARAM_CONTENT_ID] = contentId;
-		data[PARAM_PLAYLIST_ID] = playlistId;
-		utils.post(ENDPOINT + "content", data, callback);
-	}
-	
-	/**Uploads a file to the userFiles additional content folder.
-	 * <br>Can produce the following errors:
-	 * <ul>
-	 * <li><b>invalid-upload</b> if the sent file was not successfully received by the server
-	 * <li><b>upload-not-permitted</b> if the user is not allowed to upload additional content files
-	 * <li><b>upload-failed</b> if the file was received but could not be saved
-	 * <li><b>invalid-upload</b> if the sent file was not successfully received by the server
-	 * <li><b>file-too-large</b> if the sent file was larger than the server allows
-	 * <li><b>no-such-material</b> if the requested material ID does not match any available material
-	 * <li><b>no-such-page</b> if the requested page ID does not match any valid page
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {external:File} file	The file to upload
-	 * @param {string} [name=file.name]														A custom file name for the file
-	 * @param {additionalcontent.GenericCallback} [callback]								A callback to handle the server response
-	 * @param {number} [materialId=current material ID]										The ID of the material to contain the content
-	 * @param {string} [pageId=current page ID]												The ID of the page to contain the content*/
-	function uploadUserFile(file, name, callback, materialId, pageId){
-		var data = {};
-		data[PARAM_MATERIAL_ID] = materialId || material.getCurrentMaterialId();
-		data[PARAM_PAGE_ID] = pageId || material.getCurrentPageId();
-		data[PARAM_FILENAME] = name || file.name;
-		utils.upload(ENDPOINT + "add-file", data, file, callback);
-	}
-	
-	/**Deletes a user-uploaded additional content file.
-	 * <br>Can produce the following errors:
-	 * <ul>
-	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {string} contentId								The ID of the file to delete
-	 * @param {additionalcontent.GenericCallback} [callback]	A callback to handle the server response*/
-	function deleteUserFile(contentId, callback){
-		var data = {};
-		data[PARAM_CONTENT_ID] = contentId;
-		utils.post(ENDPOINT + "delete-file", data, callback);
-	}
-	
-	/**Renames a user-uploaded additional content file.
-	 * C<br>an produce the following errors:
-	 * <ul>
-	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to rename it
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {string} contentId								The ID of the file to delete
-	 * @param {string} name										The new name of the file
-	 * @param {additionalcontent.GenericCallback} [callback]	A callback to handle the server response*/
-	function renameUserFile(contentId, name, callback){
-		var data = {};
-		data[PARAM_CONTENT_ID] = contentId;
-		data[PARAM_FILENAME] = name;
-		utils.post(ENDPOINT + "rename-file", data, callback);
-	}
-	
-	/**Gets a download link to an additional content file. This should only be called immediately before starting the download, as
-	 * the URL may expire over time.
-	 * <br>Can produce the following errors:
-	 * <ul>
-	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
-	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {string} contentId								The ID of the file to delete
-	 * @param {string} [playlistId]								The ID of the current playlist (if any). Required to download other users' user
-	 * 															content from playlists.
-	 * @param {additionalcontent.URLCallback} [callback]		A callback to handle the server response*/
-	function getDownloadLink(contentId, playlistId, callback){
-		var data = {};
-		data[PARAM_CONTENT_ID] = contentId;
-		data[PARAM_PLAYLIST_ID] = playlistId;
-		utils.post(ENDPOINT + "download-link", data, callback);
-	}
-	
-	return {
-		getContents: getContents,
-		getSingleContent: getSingleContent,
-		uploadUserFile: uploadUserFile,
-		deleteUserFile: deleteUserFile,
-		renameUserFile: renameUserFile,
-		getDownloadLink: getDownloadLink
-	};
-});
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/utils', ['fi.cloubi.frontend.common.js/translations'], function(translationsJS) {
-
-	/** Offers utility functions for other JavaScript classes
-	 * @namespace utils
-	 */
-	var cssFileCache = null;
-	var extensions = {};
-
-	if (typeof String.prototype.endsWith !== 'function') {
-	    String.prototype.endsWith = function(suffix) {
-	        return this.indexOf(suffix, this.length - suffix.length) !== -1;
-	    };
-	}
-
-	
-
-	var Language = {};
-
-	if ( self.Liferay && self.Liferay.Language && self.Liferay.Language.cloubi ) {
-		
-		Language.get = Liferay.Language.get;
-		
-	} else {
-		
-		var AUI = YUI();
-		
-		Language.get = function(key) {
-			return key;
-		};
-
-		AUI.use(
-			'io-base',
-			function(AUI) {
-				Language.get = AUI.cached(
-					function(key, languageId, extraParams) {
-						var instance = this;
-
-						var url = Liferay.ThemeDisplay.getPathContext() + '/language/' + languageId + '/' + key + '/';
-
-						if (extraParams) {
-							if (typeof extraParams == 'string') {
-								url += extraParams;
-							}
-							else if (Array.isArray(extraParams)) {
-								url += extraParams.join('/');
-							}
-						}
-
-						var headers = {
-							'X-CSRF-Token': Liferay.authToken
-						};
-
-						var value = '';
-
-						AUI.io(
-							url,
-							{
-								headers: headers,
-								method: 'GET',
-								on: {
-									complete: function(i, o) {
-										value = o.responseText;
-									}
-								},
-								sync: true
-							}
-						);
-
-						return value;
-					}
-				);
-			}
-		);
-		
-	}
-	
-	var _draggingOn = false;
-
-	$("body").on("touchstart", function(){
-		_draggingOn = false;
-	});
-
-	$("body").on("touchmove", function(){
-		_draggingOn = true;
-	});
-
-	/**
-	 * Checks if dragging is enable
-	 * @memberof utils
-	 * @return {boolean} True if dragging is enabled
-	 *
-	 */
-	function isDraggingOn() {
-		return _draggingOn;
-	}
-
-	/**
-	 * Sends a get request to the given url
-	 * @memberof utils
-	 * @param url				URL where the request is sent
-	 * @param successCallback	A function that is invoked on request success
-	 * @param failureCallback	A function that is invoked on request failure
-	 */
-	function get(url, successCallback, failureCallback, allowCache) {
-
-		var settings = {
-			url: url,
-			dataType: 'json',
-			type: 'GET',
-			timeout: 5 * 60 * 1000,
-			success: function(responseJSON) {
-				if ( successCallback != null ) {
-					successCallback.call(this, responseJSON);
-				}
-			},
-			error: function() {
-				if ( failureCallback != null ) {
-					failureCallback.call(this);
-				}
-			}
-		}
-
-		if(!allowCache)
-			settings.cache = false;
-
-		jQuery.ajax(settings);
-
-	}
-
-	/**
-	 * Returns html content from given url
-	 * @memberof utils
-	 * @param url				URL where the request is sent
-	 * @param successCallback	A function that is invoked on request success
-	 * @param failureCallback	A function that is invoked on request failure
-	 */
-	function getHtml(url, successCallback, failureCallback, allowCache) {
-		var settings = {
-			url: url,
-			dataType: 'html',
-			type: 'GET',
-			timeout: 5 * 60 * 1000,
-			success: function(html) {
-				if ( successCallback != null ) {
-					successCallback.call(this, html);
-				}
-			},
-			error: function(xhr, error) {
-				if ( failureCallback != null ) {
-					failureCallback.call(this, error);
-				}
-			}
-		};
-
-		if(!allowCache)
-			settings.cache = false;
-
-		jQuery.ajax(settings);
-
-	}
-
-	/**
-	 * Sends a post request to the given url
-	 * @memberof utils
-	 * @param url				URL where the request is sent
-	 * @param data				The data that is sent in the request
-	 * @param successCallback	A function that is called on request success
-	 * @param failureCallback	A function that is called on request failure
-	 * @param responseDataType	Data type of the data that is sent
-	 */
-	function post(url, data, successCallback, failureCallback, responseDataType) {
-
-		if ( !responseDataType ) {
-			responseDataType = 'json';
-		}
-
-		jQuery.ajax({
-			url: url,
-			dataType: responseDataType,
-			contentType: 'application/json; charset=UTF-8',
-			type: 'POST',
-			timeout: 5 * 60 * 1000,
-			data: JSON.stringify(data),
-			headers: {
-				'X-CSRF-Token': Liferay.authToken
-			},
-			success: function(responseData) {
-				if ( successCallback != null ) {
-					successCallback.call(this, responseData);
-				}
-			},
-			error: function(xhr, status) {
-				if ( failureCallback != null ) {
-					failureCallback.call(this, status);
-				}
-			},
-			skipReconnectCheck: failureCallback != null
-		});
-
-	}
-
-	// This version of post also returns request data for cases where the request info is required in resolution
-	function postWithRequestData(url, data, successCallback, failureCallback, responseDataType) {
-
-		if ( !responseDataType ) {
-			responseDataType = 'json';
-		}
-
-		return jQuery.ajax({
-			url: url,
-			dataType: responseDataType,
-			contentType: 'application/json; charset=UTF-8',
-			type: 'POST',
-			timeout: 5 * 60 * 1000,
-			data: JSON.stringify(data),
-			headers: {
-				'X-CSRF-Token': Liferay.authToken
-			},
-			success: function(responseData) {
-				if ( successCallback != null ) {
-					successCallback.call(this, data, responseData);
-				}
-			},
-			error: function(xhr, status) {
-				if ( failureCallback != null ) {
-					failureCallback.call(this, status);
-				}
-			},
-			skipReconnectCheck: failureCallback != null
-		});
-
-	}
-
-	var failingRequests = [];
-	var beforeUnload = function(event) {
-        event.preventDefault();
-        return '';
-    };
-    var spinnerTimeout = null;
-	var loadingSpinner = null;
-	var pendingRequests = 0;
-
-	var translatedLoadingText = Language.get('cloubi-dialog-job-is-running', translationsJS.getLocale());
-	var loadingSpinnerTemplate = '<div id="cloubi-utils-unsaved-data-flash-message"><span class="saving-in-progress"><i class="cloubi-utils-unsaved-data-flash-message-spinner fa-spin"></i><span id="cloubi-utils-unsaved-data-flash-message-text">' + translatedLoadingText + '</span></span></div>';
-
-	function postUntilSuccessful(url, data, successCallback, failureCallback, responseDataType) {
-
-        //Make request object so we can store the parameters and redo the request later
-        var request = {
-            url: url,
-            data: data,
-            successCallback: successCallback,
-            failureCallback: failureCallback,
-            responseDataType: responseDataType
-        }
-        pendingRequests++;
-        if (pendingRequests == 1) {
-            //If this is the first request, setup safety features
-
-            //Show spinner on timeout
-            spinnerTimeout = setTimeout(function() {
-                if (!loadingSpinner) {
-                    loadingSpinner = $(loadingSpinnerTemplate);
-                    $(document.body).append(loadingSpinner);
-                }
-            }, 2000);
-
-            //Register before unload handler
-            $(window).on('beforeunload', beforeUnload);
-        }
-
-        // Success handler
-        var finishRequest = function(originalRequest, responseData) {
-            //Finish the original request
-            originalRequest.successCallback(responseData);
-            pendingRequests--;
-
-            //If there are no more requests, clear safety features
-            if (pendingRequests == 0) {
-                //Clear spinner timeout
-                clearTimeout(spinnerTimeout);
-                //Remove loading spinner if it was already shown
-                if (loadingSpinner) {
-                    loadingSpinner.remove();
-                    loadingSpinner = null;
-                }
-                //Clear before unload function
-                $(window).off('beforeunload', beforeUnload);
-            }
-
-        }
-
-        // Failure handler: retries the request until it completes
-        var retryPost = function(failingRequest, delay) {
-            // Post the request, retry if it fails
-            post(failingRequest.url, failingRequest.data,
-            function(response) {
-                finishRequest(failingRequest, response)
-
-                //If there are more failing requests, play back the next one on the list
-                if (failingRequests.length > 0) {
-                    var next = failingRequests.shift();
-                    retryPost(next, 1);
-                }
-            },
-            function() {
-                // On failure, increase delay and retry after timeout
-                if (delay < 15) {
-                    delay++;
-                }
-                console.log("Post failed, retrying in " + delay + " seconds")
-                setTimeout(function() {retryPost(failingRequest, delay)}, delay * 1000);
-            }, failingRequest.responseDataType)
-        }
-
-        // If no requests have failed, run the request as normal
-	    if (failingRequests.length == 0) {
-	        post(url, data,
-	        function(response) {
-	            finishRequest(request, response)
-	        },
-	        function() {
-	            //If the request fails, push it to the failed request list
-	            failingRequests.push(request)
-
-	            if (failingRequests.length == 1) {
-                    //If this was the first failed request, start the retry loop
-                    retryPost(request, 1);
-	            }
-	        }, responseDataType)
-	    }
-	    else {
-	        //If there are already failing requests, add this to the list so it will be processed when previous ones are done
-	        failingRequests.push(request)
-	    }
-	}
-	
-	/**
-	 * Uploads a file to the given url
-	 * @memberof utils
-	 * @param url				URL where the request is sent
-	 * @param params			The data that is sent in the request
-	 * @param file				The file that is uploaded with the request
-	 * @param successCallback	A function that is called on request success
-	 * @param failureCallback	A function that is called on request failure
-	 * @param filename			The part name of the file (default 'file')
-	 * @param responseDataType	Data type of the data that is sent
-	 */
-	function upload(url, params, file, successCallback, failureCallback, filename, responseDataType) {
-		responseDataType = responseDataType || 'json';
-		filename = filename || "file";
-		
-		var data = new FormData();
-		data.append(filename, file);
-		$.each(params, function(name, value){
-			data.append(name, value);
-		});
-
-		jQuery.ajax({
-			url: url,
-			dataType: responseDataType,
-			contentType: false,
-			enctype: 'multipart/form-data',
-			async: true,
-			type: 'POST',
-			timeout: 5 * 60 * 1000,
-			data: data,
-			processData: false,
-			headers: {
-				'X-CSRF-Token': Liferay.authToken
-			},
-			success: function(responseData) {
-				if ( successCallback != null ) {
-					successCallback.call(this, responseData);
-				}
-			},
-			error: function(xhr, status) {
-				if ( failureCallback != null ) {
-					failureCallback.call(this, status);
-				}
-			},
-			skipReconnectCheck: failureCallback != null
-		});
-	}
-
-	/**
-	 * Reloads the current page
-	 * @memberof utils
-	 */
-	function reload() {
-
-		self.location.reload();
-
-	}
-
-	/**
-	 * Polls URL until it is ready to complete the given callback function
-	 * @memberof utils
-	 * @param url		The URL that is being polled
-	 * @param callback	The callback function that is called when the URL is ready
-	 * @param tick
-	 */
-	function pollUntilReady(url, callback, tick) {
-
-		jQuery.ajax({
-			url: url,
-			dataType: 'json',
-			contentType: 'application/json; charset=UTF-8',
-			type: 'GET',
-			timeout: 5 * 60 * 1000,
-			data: '',
-			success: function(data) {
-				if ( data.hasJob ) {
-					if ( tick ) {
-						tick(data);
-					}
-					setTimeout( function() {
-						pollUntilReady(url, callback, tick);
-					}, 1000 );
-				} else {
-					callback();
-				}
-			},
-			error: function() {
-				callback();
-			},
-			cache: false
-		});
-
-	}
-
-	/** Returns a list of parameters in a function invocation
-	 * @memberof utils
-	 * @param invocation	The invocation
-	 * @return				A list of parameters in the invocation
-	 */
-	function parseFunctionInvocation(invocation) {
-
-		var start = invocation.indexOf("(");
-		var end = invocation.indexOf(")");
-
-		if ( start == -1 ) {
-			return {
-				name: invocation,
-				params: []
-			};
-		} else {
-			var name = invocation.substring(0, start);
-			var paramsStr = null;
-			if ( end == -1 ) {
-				paramsStr = invocation.substring(start+1);
-			} else {
-				paramsStr = invocation.substring(start+1, end);
-			}
-			var params = paramsStr.split(",");
-			return {
-				name: name,
-				params: params
-			};
-		}
-
-	}
-
-	/** This function seeks the specified DOM element and all it's child elements to see if they have a data-on-click attribute.
-	 * @memberof utils
-	 * @param container	The DOM element.
-	 * @param functions Object of functions that will listen events defined in trigger() -method or data-on-click attributes.
-	 * @param name		The name of the events that are listened to
-	 */
-	function attachListeners(container, functions, name) {
-
-		var attrName = "data-on-" + name;
-		var namespaced = name + ".from-data-attr";
-
-		container.find("[" + attrName + "]").each( function() {
-			var element = jQuery(this);
-			var invocation = parseFunctionInvocation(element.attr(attrName));
-			var func = functions[invocation.name];
-			if ( func ) {
-				element.on(namespaced, function(event) {
-					var params = invocation.params.slice(0);
-					params.push(event);
-					func.apply(this, params);
-				});
-			}
-		} );
-
-	}
-
-	/** Specifies listeners for events defined in trigger() method or directly in DOM using a special data-attributes.
-	 * @memberof utils
-	 * @param containerId	The id of the DOM element.
-	 * @param functions		Object of functions that will listen events defined in trigger() -method or data-on-click attributes.
-	 * @param onReady		Function that is executed when DOM is ready
-	 */
-	function listeners(containerId, functions, onReady) {
-
-		var container = jQuery("#" + containerId);
-
-		attachListeners(container, functions, "click");
-		attachListeners(container, functions, "dblclick");
-		attachListeners(container, functions, "change");
-		attachListeners(container, functions, "keyup");
-		attachListeners(container, functions, "touchend");
-
-		container.on("cloubi:custom-event.from-data-attr", function(event, name, data) {
-			var func = functions[name];
-			if ( func ) {
-				func(data);
-			}
-		});
-
-		if ( onReady ) {
-			jQuery(document).ready(onReady);
-		}
-
-	}
-
-	/**
-	 * Clears event listeners from the DOM element defined in listeners() -method.
-	 * @memberof utils
-	 * @param container	The container from which listeners are cleared from
-	 * @param name		The type of listeners that are being removed
-	 */
-	function clearListenersOfType(container, name) {
-
-		var attrName = "data-on-" + name;
-		var namespaced = name + ".from-data-attr";
-
-		container.find("[" + attrName + "]").off(namespaced);
-
-	}
-
-	/**
-	 * Clears listeners from container
-	 * @memberof utils
-	 * @param containerId	The id of the container for which listeners are cleared for
-	 */
-	function clearListeners(containerId) {
-
-		var container = jQuery("#" + containerId);
-
-		clearListenersOfType(container, "click");
-		clearListenersOfType(container, "change");
-		clearListenersOfType(container, "keyup");
-		clearListenersOfType(container, "touchend");
-
-		container.off("cloubi:custom-event.from-data-attr");
-
-	}
-
-	/**
-	 * Triggers Cloubi custom event for given DOM element.
-	 * @memberof utils
-	 * @param containerId	The id of the DOM element.
-	 * @param name			The name of the event
-	 * @param data			The event data.
-	 */
-	function trigger(containerId, name, data) {
-
-		var container = jQuery("#" + containerId);
-
-		container.trigger("cloubi:custom-event", [name, data]);
-
-	}
-
-	/**	Sets the given element as editable
-	 * @memberof utils
-	 * @param element	The element that is going to be edited
-	 * @param callback	Callback function that is called once the element has been edited
-	 */
-	function editable(element, callback) {
-
-		var text = element.text();
-
-		var editor = jQuery('<div class="cloubi-text-editable"></div>');
-		var field = jQuery('<input type="text" />');
-		var saveButton = jQuery('<button class="btn"><span class="fa fa-check"></span></button>');
-		var cancelButton = jQuery('<button class="btn"><span class="fa fa-times"></span></button>');
-
-		field.val(text);
-		editor.append(field, saveButton, cancelButton);
-
-		function doSave() {
-			callback(field.val(), element);
-			element.show();
-			editor.remove();
-		}
-
-		field.keyup( function(e) {
-			if ( e.keyCode == 13 ) {
-				doSave();
-			}
-		});
-
-		cancelButton.click(function() {
-			element.show();
-			editor.remove();
-		});
-
-		saveButton.click(doSave);
-
-		element.hide();
-
-		element.parent().append(editor);
-
-	}
-
-	/**
-	 * Returns session storage for the current page
-	 * @memberof utils
-	 * @return {Object} Session storage, if available
-	 */
-	function getStorage() {
-
-		try {
-
-			if ( window.sessionStorage ) {
-				var json = window.sessionStorage.getItem("Cloubi");
-				if ( json != null ) {
-					return JSON.parse(json);
-				}
-			}
-
-		} catch ( error ) {}
-
-		return {};
-
-	}
-
-	/**
-	 * Sets the session storage for the current page
-	 * @memberof utils
-	 * @param data	Session storage data
-	 */
-	function setStorage(data) {
-
-		try {
-
-			if ( window.sessionStorage ) {
-				window.sessionStorage.setItem("Cloubi", JSON.stringify(data));
-			}
-
-		} catch ( error ) {}
-
-	}
-
-	/**
-	 * This is a helper method to handle window.sessionStorage.
-	 *	If one wants to use the session storage, this method has to be used so that the session storage works perfectly in Cloubi 2.0.
-	 *	The namespace ensures that there can be multiple separate stores within the session storage.
-	 *	Puts value to session store.
-	 * @memberof utils
-	 * @param namespace		The name of the store.
-	 * @param key			The name for the value in the store.
-	 * @param value			The value put into the store.
-	 */
-	function putToSessionStore( namespace, key, value ) {
-		var data = getStorage();
-		data[namespace] = data[namespace] || {};
-		data[namespace][key] = value;
-		setStorage(data);
-	}
-
-	/**
-	 * Gets value from session store.
-	 * @memberof utils
-	 * @param namespace	The name of the store
-	 * @param key		The name for the value in the store.
-	 * @return {object}	The value put in the store. If the store has no value for the specified namespace and the key then null is returned.
-	 *
-	 */
-	function getFromSessionStore( namespace, key ) {
-		var data = getStorage();
-		if ( data[namespace] ) {
-			return data[namespace][key];
-		}
-		return null;
-	}
-
-	/**
-	 * Clears the store for the specified namespace from the session storage.
-	 * @memberof utils
-	 * @param namespace	The name of the store to clear
-	 */
-	function clearSessionStore( namespace ) {
-		var data = getStorage();
-		data[namespace] = {};
-		setStorage(data);
-	}
-
-	/**
-	 * Adds query parameter to url.
-	 * @memberof utils
-	 * @param url		Url where the query parameter is added
-	 * @param name		This will be set as query parameter name. Assumes that name complies with the query parameter name syntax rules
-	 * @param value		This will be set as query parameter value. Value is uri encoded so it can contain URI reserved characters
-	 * @return {string}	Url with the new query parameter added on it.
-	 */
-	function addUrlParameter(url, name, value) {
-	    if (url.indexOf('?') == -1) {
-	    	url = url + '?';
-	    }
-
-	    if (url.indexOf('=') >= 0) {
-	    	url = url + '&';
-	    }
-
-	    url = url + name + '=' + encodeURIComponent(value);
-	    return url;
-	}
-
-	/**
-	 * This method fetches GET parameter values.
-	 * @memberof utils
-	 * @param name		The name of the parameter that is returned
-	 * @return {string}	Parameter value
-	 */
-	function getUrlParameter(name) {
-	    var match = RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
-	    return match && decodeURIComponent(match[1].replace(/\+/g, ' '));
-	}
-
-	/**
-	 * Checks if the url has pathPart in its path. Here pathPart means the string between slashes in the path.
-	 * @memberof utils
-	 * @param name			Specifies the part of the path to find from the url path.
-	 * @return {boolean}	true, if the path part was found, otherwise false
-	 */
-	function hasUrlPathPart(name) {
-	    var pathParts = window.location.pathname.split('/');
-	    if (pathParts.length == 0)return false;
-
-	    return pathParts.indexOf(name) >= 0;
-
-	}
-
-	/**
-	 * Removes all css classes from element that starts with wildcard -parameter
-	 * @memberof utils
-	 * @param wildcard		Key used in removal operation of the element css classes
-	 * @param obj			The object from which classes are removed from
-	 * @return {function}
-	 */
-	function removeClassesWithWildcard(wildcard, obj) {
-
-		var patt = new RegExp('\\b' + wildcard + '\\S+',"g");
-
-		obj.removeClass(function (index, className) {
-			return (className.match(patt) || []).join(' ');
-		});
-
-	}
-
-	/**
-	 * Checks if a string starts with a certain prefix
-	 * @memberof utils
-	 * @param str			The string that is being checked for the prefix
-	 * @param prefix		The prefix for which the string is being checked for
-	 * @return {boolean}	True if string starts with the given prefix
-	 */
-	function stringStartsWith( str, prefix ) {
-
-		return str.indexOf(prefix) === 0;
-
-	}
-
-
-	function initCssFileCache() {
-		if ( cssFileCache == null ) {
-			cssFileCache = {};
-			jQuery("head link").each(function() {
-				var href = jQuery(this).attr("href");
-				cssFileCache[href] = true;
-			});
-		}
-	}
-
-	/**
-	 * Links given css file to the document
-	 * @memberof utils
-	 * @param cssFile	The css file that is being linked to the document
-	 */
-	function loadCSS(cssFile) {
-
-		initCssFileCache();
-
-		if ( cssFileCache[cssFile] ) {
-			return;
-		}
-
-		cssFileCache[cssFile] = true;
-
-		jQuery("<link>").appendTo("head").attr({type: "text/css", rel: "stylesheet"}).attr("href", cssFile);
-
-	}
-	
-	/**
-	 * Makes the loadCSS function ignore given css file. Use this if the css declarations are already loaded some other way.
-	 * @memberof utils
-	 * @param cssFile	The css file to be ignored.
-	 */
-	function markCSSLoaded(cssFile) {
-		initCssFileCache();
-		cssFileCache[cssFile] = true;
-	}
-
-	/** Registers an extension
-	 * @memberof utils
-	 * @param name		Name of the extension being registered
-	 * @param callback
-	 */
-	function registerExtension(name, callback) {
-
-		if ( extensions[name] ) {
-
-			extensions[name].callbacks.push(callback);
-
-			if ( extensions[name].data ) {
-				callback(extensions[name].data);
-			}
-
-		} else {
-
-			extensions[name] = {
-				callbacks: [callback]
-			};
-
-		}
-
-	}
-
-	/**
-	 * @memberof utils
-	 * @param name
-	 * @param data
-	 */
-	function extensionReady(name, data) {
-
-		if ( extensions[name] ) {
-
-			extensions[name].data = data;
-
-			jQuery.each(extensions[name].callbacks, function(index, func) {
-				func(data);
-			});
-
-		} else {
-
-			extensions[name] = {
-				callbacks: [],
-				data: data
-			};
-
-		}
-
-	}
-
-	/**
-	 * Returns a function, that, as long as it continues to be invoked, will not be triggered.
-	 * The function will be called after it stops being invoked for N milliseconds.
-	 * If 'immediate' is passed, trigger the function on the leading edge, instead of trailing.
-	 * @memberof utils
-	 * @param func			The function that is returned
-	 * @param wait
-	 * @param immediate		Is function triggered on the leading edge
-	 * @return {function}	The function that is called after it stops being invoked
-	 */
-	function debounce(func, wait, immediate) {
-		var timeout;
-		return function() {
-			var context = this, args = arguments;
-			var later = function() {
-				timeout = null;
-				if (!immediate) func.apply(context, args);
-			};
-			var callNow = immediate && !timeout;
-			clearTimeout(timeout);
-			timeout = setTimeout(later, wait);
-			if (callNow) func.apply(context, args);
-		};
-	}
-
-	/**
-	 * Loops all properties of JS -object. Property handler is called for each looped property.
-	 * @memberof utils
-	 * @param obj	JavaScript object whose properties are looped.
-	 * @param func	TThis handler is called for each property.
-	 */
-	function loopProperties(obj, func) {
-
-
-	    for (var prop in obj) {
-
-	    	// skip loop if the property is from prototype
-	        if(!obj.hasOwnProperty(prop)) continue;
-
-	        func(obj, prop);
-		}
-	}
-
-	/**
-	 * Returns an array of visible pages that are set as checked in the given table
-	 * @memberof utils
-	 * @param table
-	 */
-	function getVisibleSelectedPages(table) {
-
-		var pageIds = [];
-
-		var inputs = jQuery(table).find(".page-selected:checked");
-
-		jQuery.each(inputs, function() {
-
-			if ( jQuery(this).closest("tr").is(":visible") ) {
-				pageIds.push(jQuery(this).attr("data-tt-id"));
-			}
-
-
-		});
-
-		return pageIds;
-
-	}
-
-
-	/**
-	 * Returns translation for the wanted language based on key and languageId
-	 * @memberof utils
-	 * @param key			Key of the sentence/word that is being returned
-	 * @param languageId	Language Id
-	 * @param extraParams	Extra parameters
-	 * @return {string} 	The translated sentence/word for the wanted language based on given language Id
-	 *
-	 */
-	function getLanguageValue(key, languageId, extraParams) {
-		return Language.get(key, languageId, extraParams);
-	}
-
-	/**Generates a render url
-	 * @memberof utils
-	 * @param namespace	A portlet namespace as generated by the portlet:namespace tag
-	 * @param view		The name of the view to load
-	 * @return	A url that can be used to load the specified view*/
-	function getRenderUrl(namespace, view){
-		//Strip leading and trailing underscores
-		if (namespace.startsWith("_")){
-			namespace = namespace.substr(1);
-		}
-		if (namespace.endsWith("_")){
-			namespace = namespace.slice(0, -1);
-		}
-		//Use current location as a base
-		var url = location.href;
-		//Add portlet ID
-		url = addUrlParameter(url, "p_p_id", namespace);
-		//Lifecycle 0 == view
-		url = addUrlParameter(url, "p_p_lifecycle", 0);
-		url = addUrlParameter(url, "p_p_state", "exclusive");
-		url = addUrlParameter(url, "p_p_mode", "view");
-		//Add view identifier
-		url = addUrlParameter(url, "_" + namespace + "_view", view);
-		return url;
-	}
-
-	/**Generates an action url
-	 * @memberof utils
-	 * @param namespace	A portlet namespace as generated by the portlet:namespace tag
-	 * @param action	The name of the action
-	 * @return	A url that can be used to execute the action*/
-	function getActionUrl(namespace, action){
-		//Strip leading and trailing underscores
-		if (namespace.startsWith("_")){
-			namespace = namespace.substr(1);
-		}
-		if (namespace.endsWith("_")){
-			namespace = namespace.slice(0, -1);
-		}
-		//Use current location as a base
-		var url = location.href;
-		//Add portlet ID
-		url = addUrlParameter(url, "p_p_id", namespace);
-		//Lifecycle 1 == action
-		url = addUrlParameter(url, "p_p_lifecycle", 1);
-		url = addUrlParameter(url, "p_p_state", "exclusive");
-		url = addUrlParameter(url, "p_p_mode", "view");
-		//Add action identifier
-		url = addUrlParameter(url, "_" + namespace + "_javax.portlet.action", action);
-		//Add auth token
-		url = addUrlParameter(url, "p_auth", Liferay.authToken);
-		return url;
-	}
-
-	/**Transplants query parameters from an URL to the current URL
-	 * @memberof utils
-	 * @param url	A URL that has query parameters
-	 * @return	The current base URL with the query parameters of the specified URL*/
-	function moveParamsToCurrentUrl(url){
-		var params = url.split("?")[1];
-		return location.href.split("?")[0] + "?" + params;
-	}
-
-	/**Scrolls the page until the specified element is visible. If the element is larger than screen height, the screen will be scrolled to show the
-	 * top of the element and as much of its body as possible
-	 * @memberof utils
-	 * @param $elem	A jQuery object specifying the element to show
-	 * @param topOffset	The number of pixels to leave at the top for header bars etc. (default: 110)*/
-	function scrollElementIntoView($elem, topOffset){
-		topOffset = topOffset || 110;
-
-		//Get the top edge of the element
-		var elemTop = $elem.offset().top;
-		//Calculate position of the element's bottom edge
-    	var elemBottom = elemTop + $elem.height();
-    	//Get the top edge of the screen
-    	var screenTop = window.scrollY;
-    	//Calculate the current position of the screen's bottom edge
-    	var screenBottom = screenTop + window.innerHeight;
-
-    	//Check if the top of the screen is visible
-    	if (elemTop < screenTop + topOffset){
-    		//If not, scroll up until the element is in view
-    		$("html, body").animate({ scrollTop: elemTop - 10 - topOffset }, 250);
-    	}
-    	//Check if the bottom of the element is visible
-    	else if (elemBottom > screenBottom){
-    		var target;
-    		//If the element doesn't fit on the screen, show as much as possible
-    		if ($elem.height() > window.innerHeight){
-    			target = elemTop - 10 - topOffset;
-    		}
-    		else {
-    			//Otherwise scroll down to show the entire element
-    			target = elemBottom - window.innerHeight + 10;
-    		}
-    		//scroll the element into view
-    		$("html, body").animate({ scrollTop: target }, 250);
-    	}
-    }
-
-    /**
-     * Generates a random UUID.
-     * @memberOf utils
-     * @return {string} The generated UUID.
-     */
-	function randomUUID() {
-		return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, function(c) {
-			return (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16);
-		});
-	}
-	
-	function deepEqual(a, b){
-		if (a === b) return true;
-		if (typeof a !== typeof b) return false;
-		if (typeof a === 'object' || typeof a === 'array') {
-			var equal = true;
-			$.each(a, function(key){
-				if (!deepEqual(a[key], b[key])){
-					equal = false;
-					return false; //break
-				}
-			});
-			return equal;
-		}
-		return false;
-	}
-	
-	function deepExtend(target, source) {
-		for (var property in source) {
-			if (property in target && typeof target[property] === 'object') {
-				deepExtend(target[property], source[property]);
-			} else {
-				target[property] = source[property];
-			}
-		}
-		return target;
-	}
-
-	return {
-		get: get,
-		getHtml: getHtml,
-		post: post,
-		postWithRequestData: postWithRequestData,
-		postUntilSuccessful: postUntilSuccessful,
-		upload: upload,
-		reload: reload,
-		listeners: listeners,
-		clearListeners: clearListeners,
-		pollUntilReady: pollUntilReady,
-		editable: editable,
-		trigger: trigger,
-		putToSessionStore: putToSessionStore,
-		getFromSessionStore: getFromSessionStore,
-		clearSessionStore: clearSessionStore,
-		addUrlParameter: addUrlParameter,
-		getUrlParameter: getUrlParameter,
-		hasUrlPathPart: hasUrlPathPart,
-		removeClassesWithWildcard: removeClassesWithWildcard,
-		stringStartsWith: stringStartsWith,
-		loadCSS: loadCSS,
-		markCSSLoaded: markCSSLoaded,
-		debounce: debounce,
-		loopProperties: loopProperties,
-		getVisibleSelectedPages: getVisibleSelectedPages,
-		registerExtension: registerExtension,
-		extensionReady: extensionReady,
-		getLanguageValue: getLanguageValue,
-		isDraggingOn: isDraggingOn,
-		attachListeners: attachListeners,
-		getRenderUrl: getRenderUrl,
-		getActionUrl: getActionUrl,
-		moveParamsToCurrentUrl: moveParamsToCurrentUrl,
-		scrollElementIntoView: scrollElementIntoView,
-		randomUUID: randomUUID,
-		deepEqual: deepEqual,
-		deepExtend: deepExtend
-	};
-
-});
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/rest-client', ['fi.cloubi.lib.js/jquery'], function (jQuery) {
-
-    function RestClient(baseUrl) {
-        this.baseUrl = baseUrl;
-    }
-
-    RestClient.prototype.trackProgress = function (trackerId, progressCallback) {
-        var self = this;
-
-        return new Promise(function (resolve, reject) {
-            self.pollForProgress(trackerId, progressCallback, resolve, reject);
-        });
-    };
-
-    RestClient.prototype.pollForProgress = function (trackerId, progressCallback, success, failure) {
-        var self = this;
-
-        setTimeout(function () {
-            self.updateProgressTracker(trackerId).then(function (progressState) {
-                if (progressCallback != null) {
-                    progressCallback(progressState.percentage, progressState.description, progressState);
-                }
-
-                if (progressState.status === 'error') {
-                    failure(progressState.description);
-                } else if (progressState.status === 'success') {
-                    success(progressState.result);
-                } else {
-                    self.pollForProgress(trackerId, progressCallback, success, failure);
-                }
-            })
-                .catch(function (error) {
-                    failure(error);
-                });
-        }, 500);
-    };
-
-    RestClient.prototype.updateProgressTracker = function (trackerId) {
-        return this.GET('progress/job/' + trackerId);
-    };
-
-    RestClient.prototype.downloadFile = function (handler, downloadId) {
-        var xhr = new XMLHttpRequest();
-        xhr.onreadystatechange = function () {
-            if (this.readyState === 4 && this.status === 200) {
-
-                var contentDisposition = this.getResponseHeader("Content-Disposition");
-                var filename = "download";
-
-                if (contentDisposition && contentDisposition.indexOf('attachment') !== -1) {
-                    var filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-                    var matches = filenameRegex.exec(contentDisposition);
-                    if (matches != null && matches[1]) {
-                        filename = matches[1].replace(/['"]/g, '');
-                    }
-                }
-
-                var url = window.URL.createObjectURL(this.response);
-                var anchor = document.createElement('a');
-
-                anchor.href = url;
-                anchor.download = filename;
-                anchor.click();
-                window.URL.revokeObjectURL(url);
-            }
-        };
-
-        xhr.open('GET', this.baseUrl + 'download/' + handler + '/' + downloadId);
-        xhr.responseType = 'blob';
-        xhr.send();
-    };
-
-    RestClient.prototype.uploadFile = function (url, files, progressTracker, optionalData) {
-        var self = this;
-
-        return new Promise(function (resolve, reject) {
-            var formData = new FormData();
-
-            if (files instanceof FileList) {
-                for (var i = 0; i < files.length; i++) {
-                    formData.append('encoded-filename', encodeURIComponent(files[i].name));
-                    formData.append('files', files[i]);
-                }
-            } else if (files instanceof File) {
-                formData.append('encoded-filename', encodeURIComponent(files.name));
-                formData.append('files', files);
-            }
-
-            if (optionalData) {
-                Object.keys(optionalData).forEach(function (key) {
-                    if (Array.isArray(optionalData[key])) {
-                        optionalData[key].forEach(function (item) {
-                            formData.append(key, item);
-                        });
-                    } else {
-                        formData.append(key, optionalData[key]);
-                    }
-                });
-            }
-
-            jQuery.ajax({
-                type: 'POST',
-                url: self.baseUrl + url,
-                cache: false,
-                contentType: false,
-                processData: false,
-                data: formData,
-                enctype: 'multipart/form-data',
-                success: function (data, status, xhr) {
-                    if (xhr.status === 202) {
-                        var trackerId = xhr.getResponseHeader('Progress-Tracker-Job-Id');
-                        self.trackProgress(trackerId, function (percentage, description) {
-                            progressTracker.progress = percentage;
-                        }).then(resolve).catch(reject);
-                    } else if (xhr.status === 200) {
-                        resolve(data);
-                    } else {
-                        reject(status);
-                    }
-                },
-                error: reject,
-                xhr: function () {
-                    var request = jQuery.ajaxSettings.xhr();
-                    if (request.upload) {
-                        request.upload.addEventListener('progress', function (event) {
-                            if (progressTracker && event.lengthComputable) {
-                                var max = event.total;
-                                var current = event.loaded;
-                                progressTracker.progress = (Math.round((current / max) * 100));
-                            }
-                        }, false);
-                    }
-                    return request;
-                }
-            });
-        });
-    };
-
-    RestClient.prototype.ajaxPromise = function (type, url, data) {
-        var self = this;
-        return new Promise(function (resolve, reject) {
-            var queryData = null;
-            if (type !== 'GET') {
-                queryData = JSON.stringify(data);
-            }
-
-            jQuery.ajax({
-                type: type,
-                url: self.baseUrl + url,
-                data: queryData,
-                contentType: 'application/json; charset=utf-8',
-                success: function (data, status, xhr) {
-                    if (xhr.status === 202) {
-                        resolve(xhr.getResponseHeader('Progress-Tracker-Job-Id'));
-                    } else {
-                        var contentDisposition = xhr.getResponseHeader('Content-Disposition');
-                        var contentType = xhr.getResponseHeader('Content-Type');
-                        if (contentDisposition) {
-                            resolve({
-                                "data": data,
-                                "contentDisposition": contentDisposition,
-                                "contentType": contentType
-                            });
-                        } else {
-                            resolve(data);
-                        }
-                    }
-                },
-                error: reject
-            });
-        });
-    };
-
-    RestClient.prototype.GET = function (url, data) {
-        if (data) {
-            var query = "?";
-            query += Object.entries(data)
-            .filter(function(pair) { return pair[1] !== undefined; })
-            .map(function(pair) {
-                if (Array.isArray(pair[1])) {
-                    return pair[1]
-                    .filter(function(value) { return value !== undefined; })
-                    .map(function(value) {
-                        return encodeURIComponent(pair[0]) + "=" + encodeURIComponent(value);
-                    }).join("&")
-                }
-                return encodeURIComponent(pair[0]) + "=" + encodeURIComponent(pair[1]);
-            }).join("&");
-            url += query;
-        }
-        return this.ajaxPromise('GET', url, null);
-  };
-
-  RestClient.prototype.POST = function (url, data) {
-    return this.ajaxPromise('POST', url, data);
-  };
-
-  RestClient.prototype.DELETE = function (url, data) {
-    return this.ajaxPromise('DELETE', url, data);
-  };
-
-  return RestClient;
-});
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/playlists', ['./utils', './material'], function(utils, material) {
-
-	/**
-	 *
-	 * Contains functions for loading and manipulating playlists.
-	 * A playlist is a named list of product pages, created by users, usually teachers.
-	 * When students view a playlist, they only see the pages in the playlist and are only
-	 * able to move back and forward in the playlist. <br><br>A 'page' in playlist can either be
-	 * an actual page of Cloubi product, file in media bank or file uploaded by the teacher.
-	 * Support for media bank and teacher uploaded files requires the Related Content API. Without
-	 * it, playlists can contain only normal pages.
-	 * <br><br>
-	 *
-	 * To use this API, load it like this:
-	 * <pre><code>
-	 * require(['fi.cloubi.frontend/playlists'], function(playlists) {
-	 * 	playlists.getPlaylists(function(lists) {
-	 * 		console.log(lists);
-	 * 	});
-	 * });
-	 * </code></pre>
-	 *
-	 * This API focuses mainly on manipulating the actual playlists. To view a playlist, coordinated
-	 * effort of this API, material.js API and the theme itself is required. It's done like this:
-	 *
-	 * <ol>
-	 * 	<li>Register a listener with <code>material.onPlaylistChange()</code> function.</li>
-	 * 	<li>Call <code>viewPlaylist(id)</code> or <code>viewPlaylistByCode(id)</code> function.</li>
-	 *  <li>Callback registered with material.onPlaylistChange will be called. Change the theme to playlist mode:
-	 *  	hide navigation and tools, show playlist title and progress indicator.</li>
-	 *  <li>To navigate the playlist, use <code>material.changeToNextPage()</code> and
-	 *  	<code>changeToPreviousPage()</code> functions. These functions should be used anyways to
-	 *  	change to next and previous page, whether in playlist mode or not.</li>
-	 *  <li>Whenever page changes (listen with material.onPageChange function), call
-	 *  	<code>getActivePlaylistStatus()</code> and update playlist progress indicator with the information returned.</li>
-	 *  <li>Close playlist mode by calling <code>closePlaylist()</code>. This will again trigger the listener
-	 *  	registed previously with <code>material.onPlaylistChange()</code>.</li>
-	 * </ol>
-	 *
-	 * So the theme must actually implement a separate playlist view mode. In this mode, normal navigation
-	 * is disabled, only the previous and next buttons are visible. Then there is some sort of playlist
-	 * progress indicator, which tells what playlist is open. Playlist mode is kinda like a separate product
-	 * with only those pages in that order.
-	 * <br><br>
-	 *
-	 * A single playlist can contain pages from multiple products, or be associated with a particular material. Students can open
-	 * playlist created by teachers (this is the whole point of playlists). If a playlist has a page that students do not have a permission
-	 * to view, that page is trimmed from the playlist when student loads it.
-	 *
-	 * @namespace playlists
-	 *
-	 **/
-
-
-
-	/* TYPE DEFINITIONS */
-
-	/**An object representing a playlist
-	 * @memberof playlists
-	 * @mixes playlists.PlaylistMeta
-	 * @typedef {Object} Playlist
-	 * @property {string} shareCode						The share code of the playlist
-	 * @property {string} shareURL						The URL to open this playlist
-	 * @property {playlists.PlaylistPage[]} pages		An array of pages in the list*/
-
-	/**A single page in a playlist
-	 * @memberof playlists
-	 * @typedef {Object} PlaylistPage
-	 * @property {string} materialId					The material ID of this playlist page
-	 * @property {string} pageId						The page ID of this playlist page
-	 * @property {string} [relatedContentId]			The related content ID of this playlist page
-	 * @property {string} [pageTitle]					Title of the page, if available is true.
-	 * @property {string} [materialTitle]				Title of the material, if available is true.
-	 * @property {string} [relatedContantTitle]			Title of the related content, if available is true.
-	 * @property {boolean} available					True, if current user still has access to this page/related content.*/
-
-
-	/**An object representing a playlist metadata.
-	 * @memberof playlists
-	 * @mixin
-	 * @typedef {Object} PlaylistMeta
-	 * @property {string} id							The ID of the playlist
-	 * @property {string} name							The name of the playlist
-	 * @property {string} description					The description of the playlist
-	 * @property {boolean} visible						If true, anyone with the code can open the playlist*/
-
-
-
-
-	/* CALLBACK DEFINITIONS */
-
-	/**A callback to receives playlists.
-	 * @memberof playlists
-	 * @callback PlaylistsCallback
-	 * @param {playlists.Playlist[]} playlists	An array containing the playlists*/
-
-	/**A callback to receive a playlist.
-	 * @memberof playlists
-	 * @callback PlaylistCallback
-	 * @param {playlists.Playlist} playlist		The playlist or null if no such playlist exists.*/
-
-	/**A callback to receive information about playlist deletion.
-	 * @memberof playlists
-	 * @callback DeleteCallback
-	 * @param {boolean} success					True, if the playlist was successfully deleted.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist'</ul>*/
-
-	/**A callback to receive information about playlist update.
-	 * @memberof playlists
-	 * @callback UpdateCallback
-	 * @param {boolean} success					True, if the playlist was successfully updated.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'cannot-associate-playlist-with-material'</ul>*/
-
-	/**A callback to receive information about playlist creation.
-	 * @memberof playlists
-	 * @callback CreateCallback
-	 * @param {boolean} success					True, if the playlist was successfully created.
-	 * @param {playlists.Playlist} [playlist]	The just created playlist.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'no-permission-to-create-playlist' <li>'failed-to-create-playlist'</ul>*/
-
-	/**A callback to receive information about adding page to a playlist.
-	 * @memberof playlists
-	 * @callback AddCallback
-	 * @param {boolean} success					True, if the page was successfully added.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-already-in-playlist' <li>'invalid-page' <li>'page-from-unassociated-material'</ul>*/
-
-	/**A callback to receive information about removing page from a playlist.
-	 * @memberof playlists
-	 * @callback RemoveCallback
-	 * @param {boolean} success					True, if the page was successfully removed.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-not-in-playlist' <li>'invalid-page'</ul>*/
-
-	/**A callback to receive information about moving a page in a playlist.
-	 * @memberof playlists
-	 * @callback SortCallback
-	 * @param {boolean} success					True, if the page was successfully moved.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-not-in-playlist' <li>'invalid-page'</ul>*/
-
-	/**A callback to be called when playlist is in view mode.
-	 * @memberof playlists
-	 * @callback ViewCallback
-	 * @param success							True of the playlist was successfully opened, false otherwise*/
-
-	/**A callback to get the playlist status.
-	 * @memberof playlists
-	 * @callback StatusCallback
-	 * @param {boolean} hasPlaylist						True, if there is an active playlist.
-	 * @param {playlists.PlaylistMeta} [playlist]		Metadata of the current playlist.
-	 * @param {number} [pageIndex]						Index of the current page in playlist. Zero means the first page.
-	 * @param {number} [pagesTotal]						Number of the pages in current playlist.
-	 * */
-
-	/**A callback to be called when playlist is closed.
-	 * @memberof playlists
-	 * @callback CloseCallback*/
-
-
-
-	/* FUNCTION IMPLEMENTATIONS */
-
-
-	/**
-	 * Get all the playlist created by current user.
-	 * @memberof playlists
-	 * @param {playlists.PlaylistsCallback} callback			A callback to receive the playlists.
-	 */
-	function getPlaylists(callback) {
-		utils.get('/o/playlists/playlists', function(response) {
-			callback(response.playlists);
-		});
-	}
-
-	/**
-	 * Get all playlists associated with the given material id.
-	 * @memberof playlists
-	 * @param {number}                     materialId           The ID of a Cloubi material.
-	 * @param {playlists.PlaylistCallback} callback             A callback to receive the playlists.
-	 */
-	function getPlaylistsForMaterial(materialId, callback) {
-		utils.get('/o/playlists/playlists?materialId=' + materialId, function(response) {
-			callback(response.playlists);
-		});
-	}
-
-	/**
-	 * Get a playlist with given id.
-	 * @memberof playlists
-	 * @param {string} playlistId								The ID of the playlist
-	 * @param {playlists.PlaylistCallback} callback				A callback to receive the playlist.
-	 */
-	function getPlaylist(playlistId, callback) {
-		doGetPlaylist(playlistId, null, false, callback);
-	}
-
-
-	/**
-	 * Get a playlist with given share code.
-	 * @memberof playlists
-	 * @param {string} code										The share code of the playlist
-	 * @param {playlists.PlaylistCallback} callback				A callback to receive the playlist.
-	 */
-	function getPlaylistByCode(code, callback) {
-		doGetPlaylist(null, code, false, callback);
-	}
-
-
-	function doGetPlaylist(playlistId, code, trimPages, callback) {
-		var data = { trim: trimPages };
-		if ( playlistId ) {
-			data.id = playlistId;
-		}
-		if ( code ) {
-			data.code = code;
-		}
-		utils.post('/o/playlists/playlist', data, function(response) {
-			callback(response.playlist ? response.playlist : null);
-		});
-	}
-
-
-
-	/**
-	 * Checks is current user is allowed to create and modify playlists. All users can
-	 * view playlists, but usually only teachers are allowed to create them.
-	 * @memberof playlists
-	 * @return {boolean}										True, if current user can create new playlists.
-	 */
-	function isAllowedToCreatePlaylists() {
-		return Cloubi.playlists.canCreatePlaylists;
-	}
-
-
-	/**
-	 * Deletes a playlist with given id.
-	 * @memberof playlists
-	 * @param {string} playlistId								The ID of the playlist to delete.
-	 * @param {playlists.DeleteCallback} callback				A callback to be called when operation is completed.
-	 */
-	function deletePlaylist(playlistId, callback) {
-		utils.post('/o/playlists/delete', {id: playlistId}, function(response) {
-			callback(response.success);
-		});
-	}
-
-
-	/**
-	 * Updates metadata of a playlist with given id.
-	 * @memberof playlists
-	 * @param {string} playlistId								The ID of the playlist to update.
-	 * @param {playlists.PlaylistMeta} data						The new metadata. The id attribute is ignored and
-	 * 															missing attributes are not updated.
-	 * @param {playlists.UpdateCallback} callback				A callback to be called when operation is completed.
-	 */
-	function updatePlaylist(playlistId, data, callback) {
-		utils.post('/o/playlists/update', {id: playlistId, data: data}, function(response) {
-			callback(response.success);
-		});
-	}
-
-
-	/**
-	 * Creates a new, empty playlist.
-	 * @memberof playlists
-	 * @param {playlists.PlaylistMeta} data						The metadata for the new playlist. The id attribute is ignored.
-	 * @param {playlists.CreateCallback} callback				A callback to be called when operation is completed.
-	 */
-	function createPlaylist(data, callback) {
-		utils.post('/o/playlists/create', data, function(response) {
-			callback(response.success, response.playlist);
-		});
-	}
-
-
-
-	/**
-	 * Adds a page to the end of existing playlist. If the page already exists in the playlist,
-	 * this function does nothing.
-	 * @memberof playlists
-	 * @param {playlists.PlaylistPage} page						The page to be added.
-	 * @param {string} playlistId								The ID of the playlist to add the page to.
-	 * @param {playlists.AddCallback} callback					A callback to be called when operation is completed.
-	 */
-	function addToPlaylist(page, playlistId, callback) {
-		utils.post('/o/playlists/add', {id: playlistId, page: page}, function(response) {
-			callback(response.success);
-		});
-	}
-
-
-	/**
-	 * Adds the current page to the end of existing playlist. If the page already exists in the playlist,
-	 * this function does nothing.
-	 * @memberof playlists
-	 * @param {string} playlistId								The ID of the playlist to add the page to.
-	 * @param {playlists.AddCallback} callback					A callback to be called when operation is completed.
-	 */
-	function addCurrentPageToPlaylist(playlistId, callback) {
-		addToPlaylist({
-			materialId: material.getCurrentMaterialId(),
-			pageId: material.getCurrentPageId()
-		}, playlistId, callback);
-	}
-
-
-
-	/**
-	 * Removes a page from existing playlist. If the page does not exists in the playlist,
-	 * this function does nothing.
-	 * @memberof playlists
-	 * @param {playlists.PlaylistPage} page						The page to be removed. This must be a page object from a playlist returned by this API.
-	 * @param {string} playlistId								The ID of the playlist to remove the page from.
-	 * @param {playlists.RemoveCallback} callback				A callback to be called when operation is completed.
-	 */
-	function removeFromPlaylist(page, playlistId, callback) {
-		utils.post('/o/playlists/remove', {id: playlistId, page: page}, function(response) {
-			callback(response.success);
-		});
-	}
-
-
-	/**
-	 * Moves a page to a new location within a playlist.
-	 * @memberof playlists
-	 * @param {playlists.PlaylistPage} page						The page to be moved. This must be a page object from a playlist returned by this API.
-	 * @param {number} index									New location, or index, for the page. Zero means the first page of the playlist.
-	 * @param {string} playlistId								The ID of the playlist.
-	 * @param {playlists.SortCallback} callback					A callback to be called when operation is completed.
-	 */
-	function sortPlaylistItem(page, index, playlistId, callback) {
-		utils.post('/o/playlists/sort', {id: playlistId, index: index, page: page}, function(response) {
-			callback(response.success);
-		});
-	}
-
-
-	/**
-	 * Opens a playlist for viewing.
-	 * @memberof playlists
-	 * @param {string} playlistId								The ID of the playlist.
-	 * @param {playlists.ViewCallback} callback					A callback to be called when playlist view mode is open.
-	 * 															Listeners registered with <code>material.onPlaylistChange()</code>
-	 * 															will be called before this.
-	 * @param {?integer} pageNumber								The number of the page to start from
-	 */
-	function viewPlaylist(playlistId, callback, pageNumber) {
-		doGetPlaylist(playlistId, null, true, function(playlist) {
-			if ( playlist ) {
-				material.setCurrentPlaylist(playlist, pageNumber);
-				callback(true);
-			}
-			else {
-				callback(false);
-			}
-		});
-	}
-
-
-	/**
-	 * Opens a playlist for viewing.
-	 * @memberof playlists
-	 * @param {string} code										The share code of the playlist
-	 * @param {playlists.ViewCallback} callback					A callback to be called when playlist view mode is open.
-	 * 															Listeners registered with <code>material.onPlaylistChange()</code>
-	 * 															will be called before this.
-	 */
-	function viewPlaylistByCode(code, callback) {
-		doGetPlaylist(null, code, true, function(playlist) {
-			if ( playlist ) {
-				material.setCurrentPlaylist(playlist);
-				callback(true);
-			}
-			else {
-				callback(false);
-			}
-		});
-	}
-
-
-	/**
-	 * Gets information about current playlist, if there is one.
-	 * @memberof playlists
-	 * @param {playlists.StatusCallback} callback					A callback to receive the status information.
-	 */
-	function getActivePlaylistStatus(callback) {
-		var current = material.getCurrentPlaylist();
-		if ( current ) {
-			var pageSource = material.getPageSource();
-			callback(true, current, pageSource.getCurrentPageIndex(), current.pages.length);
-		} else {
-			callback(false);
-		}
-	}
-
-
-	/**
-	 * Closes currently open playlist, if there is one.
-	 * @memberof playlists
-	 * @param {playlists.CloseCallback} callback					A callback to be called when playlist is closed.
-	 * 																Listeners registered with <code>material.onPlaylistChange()</code>
-	 * 																will be called before this.
-	 */
-	function closePlaylist(callback) {
-		material.setCurrentPlaylist(null);
-		callback();
-	}
-
-
-	/**
-	 * Open playlist automatically if user opened /o/open-playlist/<id> URL.
-	 */
-	material.onMaterialReady(function() {
-
-		// Do we have a playlist to automatically open?
-		if ( Cloubi.playlists.playlistId ) {
-
-			// This should prevent the playlist from being opened twice or something..
-			var id = Cloubi.playlists.playlistId;
-			Cloubi.playlists.playlistId = null;
-
-			var pageNum = Cloubi.playlists.playlistPage;
-
-			// Check if the playlist portlet is also on the page,
-			// as it will also try to automatically open the playlist.
-			if ( jQuery('#portlet_fi_cloubi_portlet_playlist_PlaylistPortlet').length == 0 ) {
-				viewPlaylist(id, function() {}, pageNum);
-			}
-
-		}
-
-	});
-
-
-	/* PUBLIC FUNCTIONS */
-
-	return {
-		getPlaylists: getPlaylists,
-		getPlaylistsForMaterial: getPlaylistsForMaterial,
-		getPlaylist: getPlaylist,
-		getPlaylistByCode: getPlaylistByCode,
-		isAllowedToCreatePlaylists: isAllowedToCreatePlaylists,
-		deletePlaylist: deletePlaylist,
-		updatePlaylist: updatePlaylist,
-		createPlaylist: createPlaylist,
-		addToPlaylist: addToPlaylist,
-		addCurrentPageToPlaylist: addCurrentPageToPlaylist,
-		removeFromPlaylist: removeFromPlaylist,
-		sortPlaylistItem: sortPlaylistItem,
-		viewPlaylist: viewPlaylist,
-		viewPlaylistByCode: viewPlaylistByCode,
-		getActivePlaylistStatus: getActivePlaylistStatus,
-		closePlaylist: closePlaylist
-	};
-
-});
-
-
-
-jQuery(document).ready(function() {
-	
-	function initSession() {
-		
-		//Delay init until the session is available
-		if ( Liferay.Session ) {
-			//The Liferay session object is buggy, so we turn its timer off and extend the session ourselves
-			Liferay.Session.resetInterval = function(){};
-			Liferay.Session._stopTimer();
-			//Extend session every 4 minutes (since Cloubi is configured to expire it after 5 minutes by default)
-			setInterval(function(){
-				//Use the session's own extension call to make sure it works correctly
-				Liferay.Session._getExtendIO().start();
-			}, 4 * 60 * 1000);
-			//Old deprecated code
-			//Liferay.Session.set('autoExtend', true);
-			//Liferay.Session.set('sessionLength', 15);
-			//Liferay.Session.set('warningLength', 0);
-			
-			//Liferay.Session.resetInterval();
-		} else {
-			
-			setTimeout( initSession, 100 );
-			
-		}
-		
-	}
-	
-	initSession();
-	
-});
 jQuery(document).ready(function() {
 
 	var localSessionValues = {};
@@ -10160,6 +10129,37 @@ jQuery(document).ready(function() {
         });
     }
 });
+jQuery(document).ready(function() {
+	
+	function initSession() {
+		
+		//Delay init until the session is available
+		if ( Liferay.Session ) {
+			//The Liferay session object is buggy, so we turn its timer off and extend the session ourselves
+			Liferay.Session.resetInterval = function(){};
+			Liferay.Session._stopTimer();
+			//Extend session every 4 minutes (since Cloubi is configured to expire it after 5 minutes by default)
+			setInterval(function(){
+				//Use the session's own extension call to make sure it works correctly
+				Liferay.Session._getExtendIO().start();
+			}, 4 * 60 * 1000);
+			//Old deprecated code
+			//Liferay.Session.set('autoExtend', true);
+			//Liferay.Session.set('sessionLength', 15);
+			//Liferay.Session.set('warningLength', 0);
+			
+			//Liferay.Session.resetInterval();
+		} else {
+			
+			setTimeout( initSession, 100 );
+			
+		}
+		
+	}
+	
+	initSession();
+	
+});
 if ( self.__CONFIG__ ) {
 	
 	__CONFIG__.waitTimeout = 0;
@@ -10171,6 +10171,315 @@ if ( self.Loader && self.Loader._configParser && Loader._configParser._config ) 
 	Loader._configParser._config.waitTimeout = 0;
 	
 }
+define('fi.cloubi.lib.js@4.9.0.SNAPSHOT/jquery', [], function() {
+	
+	// Liferay 7 has global jQuery object, just use it.
+	
+	return jQuery;
+
+});
+
+
+
+define('fi.cloubi.lib.js@4.9.0.SNAPSHOT/offline', [], function(){
+
+/*! offline-js 0.7.17 */
+(function() {
+	
+	var Offline, checkXHR, defaultOptions, extendNative, grab, handlers, init;
+  extendNative = function(to, from) {
+    var e, key, results, val;
+    results = [];
+    for (key in from.prototype) try {
+      val = from.prototype[key], null == to[key] && "function" != typeof val ? results.push(to[key] = val) :results.push(void 0);
+    } catch (_error) {
+      e = _error;
+    }
+    return results;
+  }, Offline = {}, Offline.options = window.Offline ? window.Offline.options || {} :{}, 
+  defaultOptions = {
+    checks:{
+      xhr:{
+        url:function() {
+          return "/favicon.ico?_=" + new Date().getTime();
+        },
+        timeout:5e3,
+        type:"HEAD"
+      },
+      image:{
+        url:function() {
+          return "/favicon.ico?_=" + new Date().getTime();
+        }
+      },
+      active:"xhr"
+    },
+    checkOnLoad:!1,
+    interceptRequests:!0,
+    reconnect:!0,
+    deDupBody:!1
+  }, grab = function(obj, key) {
+    var cur, i, j, len, part, parts;
+    for (cur = obj, parts = key.split("."), i = j = 0, len = parts.length; len > j && (part = parts[i], 
+    cur = cur[part], "object" == typeof cur); i = ++j) ;
+    return i === parts.length - 1 ? cur :void 0;
+  }, Offline.getOption = function(key) {
+    var ref, val;
+    return val = null != (ref = grab(Offline.options, key)) ? ref :grab(defaultOptions, key), 
+    "function" == typeof val ? val() :val;
+  }, "function" == typeof window.addEventListener && window.addEventListener("online", function() {
+    return setTimeout(Offline.confirmUp, 100);
+  }, !1), "function" == typeof window.addEventListener && window.addEventListener("offline", function() {
+    return Offline.confirmDown();
+  }, !1), Offline.state = "up", Offline.markUp = function() {
+    return Offline.trigger("confirmed-up"), "up" !== Offline.state ? (Offline.state = "up", 
+    Offline.trigger("up")) :void 0;
+  }, Offline.markDown = function() {
+    return Offline.trigger("confirmed-down"), "down" !== Offline.state ? (Offline.state = "down", 
+    Offline.trigger("down")) :void 0;
+  }, handlers = {}, Offline.on = function(event, handler, ctx) {
+    var e, events, j, len, results;
+    if (events = event.split(" "), events.length > 1) {
+      for (results = [], j = 0, len = events.length; len > j; j++) e = events[j], results.push(Offline.on(e, handler, ctx));
+      return results;
+    }
+    return null == handlers[event] && (handlers[event] = []), handlers[event].push([ ctx, handler ]);
+  }, Offline.off = function(event, handler) {
+    var _handler, ctx, i, ref, results;
+    if (null != handlers[event]) {
+      if (handler) {
+        for (i = 0, results = []; i < handlers[event].length; ) ref = handlers[event][i], 
+        ctx = ref[0], _handler = ref[1], _handler === handler ? results.push(handlers[event].splice(i, 1)) :results.push(i++);
+        return results;
+      }
+      return handlers[event] = [];
+    }
+  }, Offline.trigger = function(event) {
+    var ctx, handler, j, len, ref, ref1, results;
+    if (null != handlers[event]) {
+      for (ref = handlers[event], results = [], j = 0, len = ref.length; len > j; j++) ref1 = ref[j], 
+      ctx = ref1[0], handler = ref1[1], results.push(handler.call(ctx));
+      return results;
+    }
+  }, checkXHR = function(xhr, onUp, onDown) {
+    var _onerror, _onload, _onreadystatechange, _ontimeout, checkStatus;
+    return checkStatus = function() {
+      return xhr.status && xhr.status < 12e3 ? onUp() :onDown();
+    }, null === xhr.onprogress ? (_onerror = xhr.onerror, xhr.onerror = function() {
+      return onDown(), "function" == typeof _onerror ? _onerror.apply(null, arguments) :void 0;
+    }, _ontimeout = xhr.ontimeout, xhr.ontimeout = function() {
+      return onDown(), "function" == typeof _ontimeout ? _ontimeout.apply(null, arguments) :void 0;
+    }, _onload = xhr.onload, xhr.onload = function() {
+      return checkStatus(), "function" == typeof _onload ? _onload.apply(null, arguments) :void 0;
+    }) :(_onreadystatechange = xhr.onreadystatechange, xhr.onreadystatechange = function() {
+      return 4 === xhr.readyState ? checkStatus() :0 === xhr.readyState && onDown(), "function" == typeof _onreadystatechange ? _onreadystatechange.apply(null, arguments) :void 0;
+    });
+  }, Offline.checks = {}, Offline.checks.xhr = function() {
+    var e, xhr;
+    xhr = new XMLHttpRequest(), xhr.offline = !1, xhr.open(Offline.getOption("checks.xhr.type"), Offline.getOption("checks.xhr.url"), !0), 
+    null != xhr.timeout && (xhr.timeout = Offline.getOption("checks.xhr.timeout")), 
+    checkXHR(xhr, Offline.markUp, Offline.markDown);
+    try {
+      xhr.send();
+    } catch (_error) {
+      e = _error, Offline.markDown();
+    }
+    return xhr;
+  }, Offline.checks.image = function() {
+    var img;
+    img = document.createElement("img"), img.onerror = Offline.markDown, img.onload = Offline.markUp, 
+    img.src = Offline.getOption("checks.image.url");
+  }, Offline.checks.down = Offline.markDown, Offline.checks.up = Offline.markUp, Offline.check = function() {
+    return Offline.trigger("checking"), Offline.checks[Offline.getOption("checks.active")]();
+  }, Offline.confirmUp = Offline.confirmDown = Offline.check, Offline.onXHR = function(cb) {
+    var _XDomainRequest, _XMLHttpRequest, monitorXHR;
+    return monitorXHR = function(req, flags) {
+      var _open;
+      return _open = req.open, req.open = function(type, url, async, user, password) {
+        return cb({
+          type:type,
+          url:url,
+          async:async,
+          flags:flags,
+          user:user,
+          password:password,
+          xhr:req
+        }), _open.apply(req, arguments);
+      };
+    }, _XMLHttpRequest = window.XMLHttpRequest, window.XMLHttpRequest = function(flags) {
+      var _overrideMimeType, _setRequestHeader, req;
+      return req = new _XMLHttpRequest(flags), monitorXHR(req, flags), _setRequestHeader = req.setRequestHeader, 
+      req.headers = {}, req.setRequestHeader = function(name, value) {
+        return req.headers[name] = value, _setRequestHeader.call(req, name, value);
+      }, _overrideMimeType = req.overrideMimeType, req.overrideMimeType = function(type) {
+        return req.mimeType = type, _overrideMimeType.call(req, type);
+      }, req;
+    }, extendNative(window.XMLHttpRequest, _XMLHttpRequest), null != window.XDomainRequest ? (_XDomainRequest = window.XDomainRequest, 
+    window.XDomainRequest = function() {
+      var req;
+      return req = new _XDomainRequest(), monitorXHR(req), req;
+    }, extendNative(window.XDomainRequest, _XDomainRequest)) :void 0;
+  }, init = function() {
+    return Offline.getOption("interceptRequests") && Offline.onXHR(function(arg) {
+      var xhr;
+      return xhr = arg.xhr, xhr.offline !== !1 ? checkXHR(xhr, Offline.markUp, Offline.confirmDown) :void 0;
+    }), Offline.getOption("checkOnLoad") ? Offline.check() :void 0;
+  }, setTimeout(init, 0), window.Offline = Offline;
+}).call(this), function() {
+  var down, next, nope, rc, reset, retryIntv, tick, tryNow, up;
+  if (!window.Offline) throw new Error("Offline Reconnect brought in without offline.js");
+  rc = Offline.reconnect = {}, retryIntv = null, reset = function() {
+    var ref;
+    return null != rc.state && "inactive" !== rc.state && Offline.trigger("reconnect:stopped"), 
+    rc.state = "inactive", rc.remaining = rc.delay = null != (ref = Offline.getOption("reconnect.initialDelay")) ? ref :3;
+  }, next = function() {
+    var delay, ref;
+    return delay = null != (ref = Offline.getOption("reconnect.delay")) ? ref :Math.min(Math.ceil(1.5 * rc.delay), 3600), 
+    rc.remaining = rc.delay = delay;
+  }, tick = function() {
+    return "connecting" !== rc.state ? (rc.remaining -= 1, Offline.trigger("reconnect:tick"), 
+    0 === rc.remaining ? tryNow() :void 0) :void 0;
+  }, tryNow = function() {
+    return "waiting" === rc.state ? (Offline.trigger("reconnect:connecting"), rc.state = "connecting", 
+    Offline.check()) :void 0;
+  }, down = function() {
+    return Offline.getOption("reconnect") ? (reset(), rc.state = "waiting", Offline.trigger("reconnect:started"), 
+    retryIntv = setInterval(tick, 1e3)) :void 0;
+  }, up = function() {
+    return null != retryIntv && clearInterval(retryIntv), reset();
+  }, nope = function() {
+    return Offline.getOption("reconnect") && "connecting" === rc.state ? (Offline.trigger("reconnect:failure"), 
+    rc.state = "waiting", next()) :void 0;
+  }, rc.tryNow = tryNow, reset(), Offline.on("down", down), Offline.on("confirmed-down", nope), 
+  Offline.on("up", up);
+}.call(this), function() {
+  var clear, flush, held, holdRequest, makeRequest, waitingOnConfirm;
+  if (!window.Offline) throw new Error("Requests module brought in without offline.js");
+  held = [], waitingOnConfirm = !1, holdRequest = function(req) {
+    return Offline.getOption("requests") !== !1 ? (Offline.trigger("requests:capture"), 
+    "down" !== Offline.state && (waitingOnConfirm = !0), held.push(req)) :void 0;
+  }, makeRequest = function(arg) {
+    var body, name, password, ref, type, url, user, val, xhr;
+    if (xhr = arg.xhr, url = arg.url, type = arg.type, user = arg.user, password = arg.password, 
+    body = arg.body, Offline.getOption("requests") !== !1) {
+      xhr.abort(), xhr.open(type, url, !0, user, password), ref = xhr.headers;
+      for (name in ref) val = ref[name], xhr.setRequestHeader(name, val);
+      return xhr.mimeType && xhr.overrideMimeType(xhr.mimeType), xhr.send(body);
+    }
+  }, clear = function() {
+    return held = [];
+  }, flush = function() {
+    var body, i, key, len, request, requests, url;
+    if (Offline.getOption("requests") !== !1) {
+      for (Offline.trigger("requests:flush"), requests = {}, i = 0, len = held.length; len > i; i++) request = held[i], 
+      url = request.url.replace(/(\?|&)_=[0-9]+/, function(match, char) {
+        return "?" === char ? char :"";
+      }), Offline.getOption("deDupBody") ? (body = request.body, body = "[object Object]" === body.toString() ? JSON.stringify(body) :body.toString(), 
+      requests[request.type.toUpperCase() + " - " + url + " - " + body] = request) :requests[request.type.toUpperCase() + " - " + url] = request;
+      for (key in requests) request = requests[key], makeRequest(request);
+      return clear();
+    }
+  }, setTimeout(function() {
+    return Offline.getOption("requests") !== !1 ? (Offline.on("confirmed-up", function() {
+      return waitingOnConfirm ? (waitingOnConfirm = !1, clear()) :void 0;
+    }), Offline.on("up", flush), Offline.on("down", function() {
+      return waitingOnConfirm = !1;
+    }), Offline.onXHR(function(request) {
+      var _onreadystatechange, _send, async, hold, xhr;
+      return xhr = request.xhr, async = request.async, xhr.offline !== !1 && (hold = function() {
+        return holdRequest(request);
+      }, _send = xhr.send, xhr.send = function(body) {
+        return request.body = body, _send.apply(xhr, arguments);
+      }, async) ? null === xhr.onprogress ? (xhr.addEventListener("error", hold, !1), 
+      xhr.addEventListener("timeout", hold, !1)) :(_onreadystatechange = xhr.onreadystatechange, 
+      xhr.onreadystatechange = function() {
+        return 0 === xhr.readyState ? hold() :4 === xhr.readyState && (0 === xhr.status || xhr.status >= 12e3) && hold(), 
+        "function" == typeof _onreadystatechange ? _onreadystatechange.apply(null, arguments) :void 0;
+      }) :void 0;
+    }), Offline.requests = {
+      flush:flush,
+      clear:clear
+    }) :void 0;
+  }, 0);
+}.call(this), function() {
+  var base, e, i, len, ref, simulate, state;
+  if (!Offline) throw new Error("Offline simulate brought in without offline.js");
+  for (ref = [ "up", "down" ], i = 0, len = ref.length; len > i; i++) {
+    state = ref[i];
+    try {
+      simulate = document.querySelector("script[data-simulate='" + state + "']") || ("undefined" != typeof localStorage && null !== localStorage ? localStorage.OFFLINE_SIMULATE :void 0) === state;
+    } catch (_error) {
+      e = _error, simulate = !1;
+    }
+  }
+  simulate && (null == Offline.options && (Offline.options = {}), null == (base = Offline.options).checks && (base.checks = {}), 
+  Offline.options.checks.active = state);
+}.call(this), function() {
+  var RETRY_TEMPLATE, TEMPLATE, _onreadystatechange, addClass, content, createFromHTML, el, flashClass, flashTimeouts, init, removeClass, render, roundTime;
+  if (!window.Offline) throw new Error("Offline UI brought in without offline.js");
+  TEMPLATE = '<div class="offline-ui"><div class="offline-ui-content"></div></div>', 
+  RETRY_TEMPLATE = '<a href class="offline-ui-retry"></a>', createFromHTML = function(html) {
+    var el;
+    return el = document.createElement("div"), el.innerHTML = html, el.children[0];
+  }, el = content = null, addClass = function(name) {
+    return removeClass(name), el.className += " " + name;
+  }, removeClass = function(name) {
+    return el.className = el.className.replace(new RegExp("(^| )" + name.split(" ").join("|") + "( |$)", "gi"), " ");
+  }, flashTimeouts = {}, flashClass = function(name, time) {
+    return addClass(name), null != flashTimeouts[name] && clearTimeout(flashTimeouts[name]), 
+    flashTimeouts[name] = setTimeout(function() {
+      return removeClass(name), delete flashTimeouts[name];
+    }, 1e3 * time);
+  }, roundTime = function(sec) {
+    var mult, unit, units, val;
+    units = {
+      day:86400,
+      hour:3600,
+      minute:60,
+      second:1
+    };
+    for (unit in units) if (mult = units[unit], sec >= mult) return val = Math.floor(sec / mult), 
+    [ val, unit ];
+    return [ "now", "" ];
+  }, render = function() {
+    var button, handler;
+    return el = createFromHTML(TEMPLATE), document.body.appendChild(el), null != Offline.reconnect && Offline.getOption("reconnect") && (el.appendChild(createFromHTML(RETRY_TEMPLATE)), 
+    button = el.querySelector(".offline-ui-retry"), handler = function(e) {
+      return e.preventDefault(), Offline.reconnect.tryNow();
+    }, null != button.addEventListener ? button.addEventListener("click", handler, !1) :button.attachEvent("click", handler)), 
+    addClass("offline-ui-" + Offline.state), content = el.querySelector(".offline-ui-content");
+  }, init = function() {
+    return render(), Offline.on("up", function() {
+      return removeClass("offline-ui-down"), addClass("offline-ui-up"), flashClass("offline-ui-up-2s", 2), 
+      flashClass("offline-ui-up-5s", 5);
+    }), Offline.on("down", function() {
+      return removeClass("offline-ui-up"), addClass("offline-ui-down"), flashClass("offline-ui-down-2s", 2), 
+      flashClass("offline-ui-down-5s", 5);
+    }), Offline.on("reconnect:connecting", function() {
+      return addClass("offline-ui-connecting"), removeClass("offline-ui-waiting");
+    }), Offline.on("reconnect:tick", function() {
+      var ref, time, unit;
+      return addClass("offline-ui-waiting"), removeClass("offline-ui-connecting"), ref = roundTime(Offline.reconnect.remaining), 
+      time = ref[0], unit = ref[1], content.setAttribute("data-retry-in-value", time), 
+      content.setAttribute("data-retry-in-unit", unit);
+    }), Offline.on("reconnect:stopped", function() {
+      return removeClass("offline-ui-connecting offline-ui-waiting"), content.setAttribute("data-retry-in-value", null), 
+      content.setAttribute("data-retry-in-unit", null);
+    }), Offline.on("reconnect:failure", function() {
+      return flashClass("offline-ui-reconnect-failed-2s", 2), flashClass("offline-ui-reconnect-failed-5s", 5);
+    }), Offline.on("reconnect:success", function() {
+      return flashClass("offline-ui-reconnect-succeeded-2s", 2), flashClass("offline-ui-reconnect-succeeded-5s", 5);
+    });
+  }, "complete" === document.readyState ? init() :null != document.addEventListener ? document.addEventListener("DOMContentLoaded", init, !1) :(_onreadystatechange = document.onreadystatechange, 
+  document.onreadystatechange = function() {
+    return "complete" === document.readyState && init(), "function" == typeof _onreadystatechange ? _onreadystatechange.apply(null, arguments) :void 0;
+  });
+}.call(this);
+
+
+return {};
+
+});
+
 define('fi.cloubi.lib.js@4.9.0.SNAPSHOT/jquery-ui', ['./jquery'], function(jQuery) {
 
 	/* Load jQuery UI CSS. */
@@ -26792,320 +27101,11 @@ var tooltip = $.widget( "ui.tooltip", {
 
 });
 
-define('fi.cloubi.lib.js@4.9.0.SNAPSHOT/jquery', [], function() {
-	
-	// Liferay 7 has global jQuery object, just use it.
-	
-	return jQuery;
-
-});
-
-
-
 define('fi.cloubi.lib.js@4.9.0.SNAPSHOT/modernizr-custom', [], function(){
 
 /*! modernizr 3.3.1 (Custom Build) | MIT *
  * https://modernizr.com/download/?-csscalc-cssremunit-setclasses !*/
 !function(e,n,s){function t(e,n){return typeof e===n}function a(){var e,n,s,a,o,i,c;for(var f in l)if(l.hasOwnProperty(f)){if(e=[],n=l[f],n.name&&(e.push(n.name.toLowerCase()),n.options&&n.options.aliases&&n.options.aliases.length))for(s=0;s<n.options.aliases.length;s++)e.push(n.options.aliases[s].toLowerCase());for(a=t(n.fn,"function")?n.fn():n.fn,o=0;o<e.length;o++)i=e[o],c=i.split("."),1===c.length?Modernizr[c[0]]=a:(!Modernizr[c[0]]||Modernizr[c[0]]instanceof Boolean||(Modernizr[c[0]]=new Boolean(Modernizr[c[0]])),Modernizr[c[0]][c[1]]=a),r.push((a?"":"no-")+c.join("-"))}}function o(e){var n=f.className,s=Modernizr._config.classPrefix||"";if(u&&(n=n.baseVal),Modernizr._config.enableJSClass){var t=new RegExp("(^|\\s)"+s+"no-js(\\s|$)");n=n.replace(t,"$1"+s+"js$2")}Modernizr._config.enableClasses&&(n+=" "+s+e.join(" "+s),u?f.className.baseVal=n:f.className=n)}function i(){return"function"!=typeof n.createElement?n.createElement(arguments[0]):u?n.createElementNS.call(n,"http://www.w3.org/2000/svg",arguments[0]):n.createElement.apply(n,arguments)}var r=[],l=[],c={_version:"3.3.1",_config:{classPrefix:"",enableClasses:!0,enableJSClass:!0,usePrefixes:!0},_q:[],on:function(e,n){var s=this;setTimeout(function(){n(s[e])},0)},addTest:function(e,n,s){l.push({name:e,fn:n,options:s})},addAsyncTest:function(e){l.push({name:null,fn:e})}},Modernizr=function(){};Modernizr.prototype=c,Modernizr=new Modernizr;var f=n.documentElement,u="svg"===f.nodeName.toLowerCase();Modernizr.addTest("cssremunit",function(){var e=i("a").style;try{e.fontSize="3rem"}catch(n){}return/rem/.test(e.fontSize)});var m=c._config.usePrefixes?" -webkit- -moz- -o- -ms- ".split(" "):["",""];c._prefixes=m,Modernizr.addTest("csscalc",function(){var e="width:",n="calc(10px);",s=i("a");return s.style.cssText=e+m.join(n+e),!!s.style.length}),a(),o(r),delete c.addTest,delete c.addAsyncTest;for(var p=0;p<Modernizr._q.length;p++)Modernizr._q[p]();e.Modernizr=Modernizr}(window,document);
-
-});
-
-define('fi.cloubi.lib.js@4.9.0.SNAPSHOT/offline', [], function(){
-
-/*! offline-js 0.7.17 */
-(function() {
-	
-	var Offline, checkXHR, defaultOptions, extendNative, grab, handlers, init;
-  extendNative = function(to, from) {
-    var e, key, results, val;
-    results = [];
-    for (key in from.prototype) try {
-      val = from.prototype[key], null == to[key] && "function" != typeof val ? results.push(to[key] = val) :results.push(void 0);
-    } catch (_error) {
-      e = _error;
-    }
-    return results;
-  }, Offline = {}, Offline.options = window.Offline ? window.Offline.options || {} :{}, 
-  defaultOptions = {
-    checks:{
-      xhr:{
-        url:function() {
-          return "/favicon.ico?_=" + new Date().getTime();
-        },
-        timeout:5e3,
-        type:"HEAD"
-      },
-      image:{
-        url:function() {
-          return "/favicon.ico?_=" + new Date().getTime();
-        }
-      },
-      active:"xhr"
-    },
-    checkOnLoad:!1,
-    interceptRequests:!0,
-    reconnect:!0,
-    deDupBody:!1
-  }, grab = function(obj, key) {
-    var cur, i, j, len, part, parts;
-    for (cur = obj, parts = key.split("."), i = j = 0, len = parts.length; len > j && (part = parts[i], 
-    cur = cur[part], "object" == typeof cur); i = ++j) ;
-    return i === parts.length - 1 ? cur :void 0;
-  }, Offline.getOption = function(key) {
-    var ref, val;
-    return val = null != (ref = grab(Offline.options, key)) ? ref :grab(defaultOptions, key), 
-    "function" == typeof val ? val() :val;
-  }, "function" == typeof window.addEventListener && window.addEventListener("online", function() {
-    return setTimeout(Offline.confirmUp, 100);
-  }, !1), "function" == typeof window.addEventListener && window.addEventListener("offline", function() {
-    return Offline.confirmDown();
-  }, !1), Offline.state = "up", Offline.markUp = function() {
-    return Offline.trigger("confirmed-up"), "up" !== Offline.state ? (Offline.state = "up", 
-    Offline.trigger("up")) :void 0;
-  }, Offline.markDown = function() {
-    return Offline.trigger("confirmed-down"), "down" !== Offline.state ? (Offline.state = "down", 
-    Offline.trigger("down")) :void 0;
-  }, handlers = {}, Offline.on = function(event, handler, ctx) {
-    var e, events, j, len, results;
-    if (events = event.split(" "), events.length > 1) {
-      for (results = [], j = 0, len = events.length; len > j; j++) e = events[j], results.push(Offline.on(e, handler, ctx));
-      return results;
-    }
-    return null == handlers[event] && (handlers[event] = []), handlers[event].push([ ctx, handler ]);
-  }, Offline.off = function(event, handler) {
-    var _handler, ctx, i, ref, results;
-    if (null != handlers[event]) {
-      if (handler) {
-        for (i = 0, results = []; i < handlers[event].length; ) ref = handlers[event][i], 
-        ctx = ref[0], _handler = ref[1], _handler === handler ? results.push(handlers[event].splice(i, 1)) :results.push(i++);
-        return results;
-      }
-      return handlers[event] = [];
-    }
-  }, Offline.trigger = function(event) {
-    var ctx, handler, j, len, ref, ref1, results;
-    if (null != handlers[event]) {
-      for (ref = handlers[event], results = [], j = 0, len = ref.length; len > j; j++) ref1 = ref[j], 
-      ctx = ref1[0], handler = ref1[1], results.push(handler.call(ctx));
-      return results;
-    }
-  }, checkXHR = function(xhr, onUp, onDown) {
-    var _onerror, _onload, _onreadystatechange, _ontimeout, checkStatus;
-    return checkStatus = function() {
-      return xhr.status && xhr.status < 12e3 ? onUp() :onDown();
-    }, null === xhr.onprogress ? (_onerror = xhr.onerror, xhr.onerror = function() {
-      return onDown(), "function" == typeof _onerror ? _onerror.apply(null, arguments) :void 0;
-    }, _ontimeout = xhr.ontimeout, xhr.ontimeout = function() {
-      return onDown(), "function" == typeof _ontimeout ? _ontimeout.apply(null, arguments) :void 0;
-    }, _onload = xhr.onload, xhr.onload = function() {
-      return checkStatus(), "function" == typeof _onload ? _onload.apply(null, arguments) :void 0;
-    }) :(_onreadystatechange = xhr.onreadystatechange, xhr.onreadystatechange = function() {
-      return 4 === xhr.readyState ? checkStatus() :0 === xhr.readyState && onDown(), "function" == typeof _onreadystatechange ? _onreadystatechange.apply(null, arguments) :void 0;
-    });
-  }, Offline.checks = {}, Offline.checks.xhr = function() {
-    var e, xhr;
-    xhr = new XMLHttpRequest(), xhr.offline = !1, xhr.open(Offline.getOption("checks.xhr.type"), Offline.getOption("checks.xhr.url"), !0), 
-    null != xhr.timeout && (xhr.timeout = Offline.getOption("checks.xhr.timeout")), 
-    checkXHR(xhr, Offline.markUp, Offline.markDown);
-    try {
-      xhr.send();
-    } catch (_error) {
-      e = _error, Offline.markDown();
-    }
-    return xhr;
-  }, Offline.checks.image = function() {
-    var img;
-    img = document.createElement("img"), img.onerror = Offline.markDown, img.onload = Offline.markUp, 
-    img.src = Offline.getOption("checks.image.url");
-  }, Offline.checks.down = Offline.markDown, Offline.checks.up = Offline.markUp, Offline.check = function() {
-    return Offline.trigger("checking"), Offline.checks[Offline.getOption("checks.active")]();
-  }, Offline.confirmUp = Offline.confirmDown = Offline.check, Offline.onXHR = function(cb) {
-    var _XDomainRequest, _XMLHttpRequest, monitorXHR;
-    return monitorXHR = function(req, flags) {
-      var _open;
-      return _open = req.open, req.open = function(type, url, async, user, password) {
-        return cb({
-          type:type,
-          url:url,
-          async:async,
-          flags:flags,
-          user:user,
-          password:password,
-          xhr:req
-        }), _open.apply(req, arguments);
-      };
-    }, _XMLHttpRequest = window.XMLHttpRequest, window.XMLHttpRequest = function(flags) {
-      var _overrideMimeType, _setRequestHeader, req;
-      return req = new _XMLHttpRequest(flags), monitorXHR(req, flags), _setRequestHeader = req.setRequestHeader, 
-      req.headers = {}, req.setRequestHeader = function(name, value) {
-        return req.headers[name] = value, _setRequestHeader.call(req, name, value);
-      }, _overrideMimeType = req.overrideMimeType, req.overrideMimeType = function(type) {
-        return req.mimeType = type, _overrideMimeType.call(req, type);
-      }, req;
-    }, extendNative(window.XMLHttpRequest, _XMLHttpRequest), null != window.XDomainRequest ? (_XDomainRequest = window.XDomainRequest, 
-    window.XDomainRequest = function() {
-      var req;
-      return req = new _XDomainRequest(), monitorXHR(req), req;
-    }, extendNative(window.XDomainRequest, _XDomainRequest)) :void 0;
-  }, init = function() {
-    return Offline.getOption("interceptRequests") && Offline.onXHR(function(arg) {
-      var xhr;
-      return xhr = arg.xhr, xhr.offline !== !1 ? checkXHR(xhr, Offline.markUp, Offline.confirmDown) :void 0;
-    }), Offline.getOption("checkOnLoad") ? Offline.check() :void 0;
-  }, setTimeout(init, 0), window.Offline = Offline;
-}).call(this), function() {
-  var down, next, nope, rc, reset, retryIntv, tick, tryNow, up;
-  if (!window.Offline) throw new Error("Offline Reconnect brought in without offline.js");
-  rc = Offline.reconnect = {}, retryIntv = null, reset = function() {
-    var ref;
-    return null != rc.state && "inactive" !== rc.state && Offline.trigger("reconnect:stopped"), 
-    rc.state = "inactive", rc.remaining = rc.delay = null != (ref = Offline.getOption("reconnect.initialDelay")) ? ref :3;
-  }, next = function() {
-    var delay, ref;
-    return delay = null != (ref = Offline.getOption("reconnect.delay")) ? ref :Math.min(Math.ceil(1.5 * rc.delay), 3600), 
-    rc.remaining = rc.delay = delay;
-  }, tick = function() {
-    return "connecting" !== rc.state ? (rc.remaining -= 1, Offline.trigger("reconnect:tick"), 
-    0 === rc.remaining ? tryNow() :void 0) :void 0;
-  }, tryNow = function() {
-    return "waiting" === rc.state ? (Offline.trigger("reconnect:connecting"), rc.state = "connecting", 
-    Offline.check()) :void 0;
-  }, down = function() {
-    return Offline.getOption("reconnect") ? (reset(), rc.state = "waiting", Offline.trigger("reconnect:started"), 
-    retryIntv = setInterval(tick, 1e3)) :void 0;
-  }, up = function() {
-    return null != retryIntv && clearInterval(retryIntv), reset();
-  }, nope = function() {
-    return Offline.getOption("reconnect") && "connecting" === rc.state ? (Offline.trigger("reconnect:failure"), 
-    rc.state = "waiting", next()) :void 0;
-  }, rc.tryNow = tryNow, reset(), Offline.on("down", down), Offline.on("confirmed-down", nope), 
-  Offline.on("up", up);
-}.call(this), function() {
-  var clear, flush, held, holdRequest, makeRequest, waitingOnConfirm;
-  if (!window.Offline) throw new Error("Requests module brought in without offline.js");
-  held = [], waitingOnConfirm = !1, holdRequest = function(req) {
-    return Offline.getOption("requests") !== !1 ? (Offline.trigger("requests:capture"), 
-    "down" !== Offline.state && (waitingOnConfirm = !0), held.push(req)) :void 0;
-  }, makeRequest = function(arg) {
-    var body, name, password, ref, type, url, user, val, xhr;
-    if (xhr = arg.xhr, url = arg.url, type = arg.type, user = arg.user, password = arg.password, 
-    body = arg.body, Offline.getOption("requests") !== !1) {
-      xhr.abort(), xhr.open(type, url, !0, user, password), ref = xhr.headers;
-      for (name in ref) val = ref[name], xhr.setRequestHeader(name, val);
-      return xhr.mimeType && xhr.overrideMimeType(xhr.mimeType), xhr.send(body);
-    }
-  }, clear = function() {
-    return held = [];
-  }, flush = function() {
-    var body, i, key, len, request, requests, url;
-    if (Offline.getOption("requests") !== !1) {
-      for (Offline.trigger("requests:flush"), requests = {}, i = 0, len = held.length; len > i; i++) request = held[i], 
-      url = request.url.replace(/(\?|&)_=[0-9]+/, function(match, char) {
-        return "?" === char ? char :"";
-      }), Offline.getOption("deDupBody") ? (body = request.body, body = "[object Object]" === body.toString() ? JSON.stringify(body) :body.toString(), 
-      requests[request.type.toUpperCase() + " - " + url + " - " + body] = request) :requests[request.type.toUpperCase() + " - " + url] = request;
-      for (key in requests) request = requests[key], makeRequest(request);
-      return clear();
-    }
-  }, setTimeout(function() {
-    return Offline.getOption("requests") !== !1 ? (Offline.on("confirmed-up", function() {
-      return waitingOnConfirm ? (waitingOnConfirm = !1, clear()) :void 0;
-    }), Offline.on("up", flush), Offline.on("down", function() {
-      return waitingOnConfirm = !1;
-    }), Offline.onXHR(function(request) {
-      var _onreadystatechange, _send, async, hold, xhr;
-      return xhr = request.xhr, async = request.async, xhr.offline !== !1 && (hold = function() {
-        return holdRequest(request);
-      }, _send = xhr.send, xhr.send = function(body) {
-        return request.body = body, _send.apply(xhr, arguments);
-      }, async) ? null === xhr.onprogress ? (xhr.addEventListener("error", hold, !1), 
-      xhr.addEventListener("timeout", hold, !1)) :(_onreadystatechange = xhr.onreadystatechange, 
-      xhr.onreadystatechange = function() {
-        return 0 === xhr.readyState ? hold() :4 === xhr.readyState && (0 === xhr.status || xhr.status >= 12e3) && hold(), 
-        "function" == typeof _onreadystatechange ? _onreadystatechange.apply(null, arguments) :void 0;
-      }) :void 0;
-    }), Offline.requests = {
-      flush:flush,
-      clear:clear
-    }) :void 0;
-  }, 0);
-}.call(this), function() {
-  var base, e, i, len, ref, simulate, state;
-  if (!Offline) throw new Error("Offline simulate brought in without offline.js");
-  for (ref = [ "up", "down" ], i = 0, len = ref.length; len > i; i++) {
-    state = ref[i];
-    try {
-      simulate = document.querySelector("script[data-simulate='" + state + "']") || ("undefined" != typeof localStorage && null !== localStorage ? localStorage.OFFLINE_SIMULATE :void 0) === state;
-    } catch (_error) {
-      e = _error, simulate = !1;
-    }
-  }
-  simulate && (null == Offline.options && (Offline.options = {}), null == (base = Offline.options).checks && (base.checks = {}), 
-  Offline.options.checks.active = state);
-}.call(this), function() {
-  var RETRY_TEMPLATE, TEMPLATE, _onreadystatechange, addClass, content, createFromHTML, el, flashClass, flashTimeouts, init, removeClass, render, roundTime;
-  if (!window.Offline) throw new Error("Offline UI brought in without offline.js");
-  TEMPLATE = '<div class="offline-ui"><div class="offline-ui-content"></div></div>', 
-  RETRY_TEMPLATE = '<a href class="offline-ui-retry"></a>', createFromHTML = function(html) {
-    var el;
-    return el = document.createElement("div"), el.innerHTML = html, el.children[0];
-  }, el = content = null, addClass = function(name) {
-    return removeClass(name), el.className += " " + name;
-  }, removeClass = function(name) {
-    return el.className = el.className.replace(new RegExp("(^| )" + name.split(" ").join("|") + "( |$)", "gi"), " ");
-  }, flashTimeouts = {}, flashClass = function(name, time) {
-    return addClass(name), null != flashTimeouts[name] && clearTimeout(flashTimeouts[name]), 
-    flashTimeouts[name] = setTimeout(function() {
-      return removeClass(name), delete flashTimeouts[name];
-    }, 1e3 * time);
-  }, roundTime = function(sec) {
-    var mult, unit, units, val;
-    units = {
-      day:86400,
-      hour:3600,
-      minute:60,
-      second:1
-    };
-    for (unit in units) if (mult = units[unit], sec >= mult) return val = Math.floor(sec / mult), 
-    [ val, unit ];
-    return [ "now", "" ];
-  }, render = function() {
-    var button, handler;
-    return el = createFromHTML(TEMPLATE), document.body.appendChild(el), null != Offline.reconnect && Offline.getOption("reconnect") && (el.appendChild(createFromHTML(RETRY_TEMPLATE)), 
-    button = el.querySelector(".offline-ui-retry"), handler = function(e) {
-      return e.preventDefault(), Offline.reconnect.tryNow();
-    }, null != button.addEventListener ? button.addEventListener("click", handler, !1) :button.attachEvent("click", handler)), 
-    addClass("offline-ui-" + Offline.state), content = el.querySelector(".offline-ui-content");
-  }, init = function() {
-    return render(), Offline.on("up", function() {
-      return removeClass("offline-ui-down"), addClass("offline-ui-up"), flashClass("offline-ui-up-2s", 2), 
-      flashClass("offline-ui-up-5s", 5);
-    }), Offline.on("down", function() {
-      return removeClass("offline-ui-up"), addClass("offline-ui-down"), flashClass("offline-ui-down-2s", 2), 
-      flashClass("offline-ui-down-5s", 5);
-    }), Offline.on("reconnect:connecting", function() {
-      return addClass("offline-ui-connecting"), removeClass("offline-ui-waiting");
-    }), Offline.on("reconnect:tick", function() {
-      var ref, time, unit;
-      return addClass("offline-ui-waiting"), removeClass("offline-ui-connecting"), ref = roundTime(Offline.reconnect.remaining), 
-      time = ref[0], unit = ref[1], content.setAttribute("data-retry-in-value", time), 
-      content.setAttribute("data-retry-in-unit", unit);
-    }), Offline.on("reconnect:stopped", function() {
-      return removeClass("offline-ui-connecting offline-ui-waiting"), content.setAttribute("data-retry-in-value", null), 
-      content.setAttribute("data-retry-in-unit", null);
-    }), Offline.on("reconnect:failure", function() {
-      return flashClass("offline-ui-reconnect-failed-2s", 2), flashClass("offline-ui-reconnect-failed-5s", 5);
-    }), Offline.on("reconnect:success", function() {
-      return flashClass("offline-ui-reconnect-succeeded-2s", 2), flashClass("offline-ui-reconnect-succeeded-5s", 5);
-    });
-  }, "complete" === document.readyState ? init() :null != document.addEventListener ? document.addEventListener("DOMContentLoaded", init, !1) :(_onreadystatechange = document.onreadystatechange, 
-  document.onreadystatechange = function() {
-    return "complete" === document.readyState && init(), "function" == typeof _onreadystatechange ? _onreadystatechange.apply(null, arguments) :void 0;
-  });
-}.call(this);
-
-
-return {};
 
 });
 
