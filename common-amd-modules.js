@@ -1,3 +1,212 @@
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/gamification', ['./utils', './material'], function(utils, material) {
+	
+	/**
+	 Contains functions for interacting with Cloubi's gamification features.
+	 <br><br>
+	 These function are intended to be used within materials. If used outside materials, make sure to always manually provide material IDs.
+	 <br><br>
+	 
+	 To use this API, load it like this:
+	 
+	 <pre><code>
+	require(['fi.cloubi.frontend/gamification'], function(gamification) {
+		gamification.isEnabled().then( function(enabled) {
+			if (enabled) console.log("Gamification is enabled");
+			else console.log("Gamification is disabled");
+		});
+	});
+	 </code></pre>
+	 
+	 * @namespace gamification */
+	
+	/**An array of errors encountered while executing a request.
+	 * All gamification functions except isEnabled will return the error "no-such-realm" if the function is called for a material
+	 * that does not have gamification features enabled.
+	 * @memberof gamification
+	 * @typedef {Array} Error*/
+	
+	/**Represents an achievement that the player can level up by meeting certain criteria.
+	 * @memberof gamification
+	 * @typedef {Object} Achievement
+	 * @property {string} id									The ID of this achievement
+	 * @property {string} title 								The name of this achievement
+	 * @property {string} description							The description of this achievement
+	 * @property {string} [group]								The name of the achievement group this achievement belongs to (if any)
+	 * @property {number} level									The user's current level number in this achievement. 
+	 * 															Level 0 means that the achievement has not yet been unlocked.
+	 * @property {gamification.AchievementLevel} currentLevel	The data of the user's current level in this achievement.
+	 * @property {gamification.AchievementLevel} [nextLevel]	The data of the user's next level in this achievement, if any.*/
+	
+	/**Represents a single level in an achievement. Each level must be unlocked separately and has its own unlock criteria.
+	 * @memberof gamification
+	 * @typedef {Object} AchievementLevel
+	 * @property {string} title			The name of this level
+	 * @property {string} description	The description of this level
+	 * @property {string} awardText		Text that should be shown to the user when this level is unlocked
+	 * @property {string} [badgeImage]	A download URL for a small image representing this level
+	 * @property {string} [largeImage]	A download URL for a large image representing this level*/
+	
+	/**An avatar that the player may select to represent themselves.
+	 * @memberof gamification
+	 * @typedef {Object} Avatar
+	 * @property {string} id			The ID of this avatar
+	 * @property {string} name			The default name of this avatar
+	 * @property {string} description	A description of this avatar
+	 * @property {string} [largeImage]	A download URL for a large image representing this avatar
+	 * @property {string} [markerImage]	A download URL for a small image representing this avatar*/
+	
+	/**Contains the status of the current user
+	 * @memberof gamification
+	 * @typedef {Object} Player
+	 * @param {string} name					The player's name
+	 * @param {boolean} hasAvatar			True if the player has chosen an avatar
+	 * @property {string} [largeImage]		A download URL for a large image representing the player's avatar
+	 * @property {string} [markerImage]		A download URL for a small image representing the player's  avatar
+	 * @property {Array<String>} overlays	An array of download URLs to images that should be drawn over the player's avatar*/
+	
+	
+	var BASE_URL="/o/gamification/";	
+	var PARAM_MATERIAL = "materialId";
+	
+	var enabledMaterials = {};
+	
+	/**Checks whether gamification features have been enabled for the specified product
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material to check
+	 * @return {Promise<boolean, gamification.Error>}	Resolves to true if gamification is enabled, false otherwise*/
+	function isEnabled(materialId){
+		var cacheKey = materialId || material.getCurrentMaterialId();
+		if ( enabledMaterials[cacheKey] ) {
+			return enabledMaterials[cacheKey]; 
+		} else {
+			var promise = _postWithPromise("enabled", materialId, {}, function(d, result) {
+				if (result.enabled){
+					d.resolve(true);
+				}
+				else {
+					d.resolve(false);
+				}
+			});
+			enabledMaterials[cacheKey] = promise;
+			return promise;
+		}
+	}
+	
+	/**Loads all achievements that are currently visible to the player in the specified material
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of achievements in the current material*/
+	function getAchievements(materialId){
+		return _doGetAchievements("achievements", materialId);
+	}
+	
+	/**Loads all achievements that the player has unlocked but have not yet been marked as shown. Note that this does not perform checks to see
+	 * if any new achievements have been unlocked, use {@link gamification.checkAchievements} to also check for new achievements.
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of pending achievements*/
+	function getPendingAchievements(materialId){
+		return _doGetAchievements("pending-achievements", materialId);
+	}
+	
+	/**Checks if any new achievements have been unlocked and then loads all achievements that the player has unlocked but have not yet been 
+	 * marked as shown. To load pending achievements without checking for new ones, use {@link gamification.getPendingAchievements}
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of pending achievements*/
+	function checkAchievements(materialId){
+		return _doGetAchievements("check-achievements", materialId);
+	}
+	
+	/**Common handler for functions that return achievements*/
+	function _doGetAchievements(action, materialId){
+		return _postAndHandleSuccess(action, materialId, {}, "achievements");
+	}
+	
+	/**Marks achievements as notified, so that they will no longer appear in the user's list of pending achievements
+	 * @memberof gamification
+	 * @param {Array<String>} achievements				An array of achievement IDs
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<undefined, gamification.Error>}	Resolves when the request has been executed*/
+	function markAchievements(achievements, materialId){
+		return _postAndHandleSuccess("mark-achievements", materialId, {achievements: achievements});
+	}
+	
+	/**Loads all avatars in the specified material
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<Array<gamification.Avatar>, gamification.Error>}	Resolves to an array of avatars in the current material*/
+	function getAvatars(materialId){
+		return _postAndHandleSuccess("avatars", materialId, {}, "avatars");
+	}
+	
+	/**Gets current player status in the specified material
+	 * @memberof gamification
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<gamification.Player, gamification.Error>}	Resolves to the current player status*/
+	function getPlayerStatus(materialId){
+		return _postAndHandleSuccess("player-status", materialId, {}, "player");
+	}
+	
+	/**Sets the player's avatar in the specified material
+	 * @memberof gamification
+	 * @param {string} name								The name that the player has chosen
+	 * @param {string} avatarId							The ID of avatar that the player has chosen
+	 * @param {string} [materialId=Current material ID]	The ID of the material
+	 * @return {Promise<undefined, gamification.Error>}	Resolves when the request has been executed*/
+	function setAvatar(name, avatarId, materialId){
+		return _postAndHandleSuccess("set-avatar", materialId, {name: name, avatar: avatarId});
+	}
+	
+	/**Posts an action, resolves the promise with a specified result field or rejects with any errors from the server
+	 * @param resultFieldName	The name of the field in the result object that should be used to resolve the promise*/
+	function _postAndHandleSuccess(action, materialId, data, resultFieldName){
+		return _postWithPromise(action, materialId, data, function(d, result) {
+			if (result.success){
+				if (resultFieldName){
+					d.resolve(result[resultFieldName]);
+				}
+				else {
+					d.resolve();
+				}
+			}
+			else {
+				d.reject(result.errors);
+			}
+		});
+	}
+	
+	/**Posts an AJAX call to the gamification endpoint and returns a promise
+	 * @param action		The name of the action that should be invoked
+	 * @param materialId	The material ID to send (default: current material ID)
+	 * @param data			The data to send
+	 * @param processor		A callback function to process the response. Receives the Deferred object of the promise as well as the server response
+	 * 						as parameters and should either reject or resolve the Deferred based on the response data.*/
+	function _postWithPromise(action, materialId, data, processor){
+		var deferred = new $.Deferred();
+		data[PARAM_MATERIAL] = materialId || material.getCurrentMaterialId();
+		utils.post(BASE_URL + action, data, function(result){
+			processor(deferred, result);
+		},
+		function(error){
+			deferred.reject([error]);
+		})
+		return deferred.promise();
+	}
+	
+	return {
+		isEnabled: isEnabled,
+		getAchievements: getAchievements,
+		getPendingAchievements: getPendingAchievements,
+		checkAchievements: checkAchievements,
+		markAchievements: markAchievements,
+		getAvatars: getAvatars,
+		getPlayerStatus: getPlayerStatus,
+		setAvatar: setAvatar
+	}
+	
+});
+
 define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/notes', ['./utils', './material'], function(utils, material) {
 	
 	/**
@@ -415,6 +624,5362 @@ define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/notes', ['./utils', './mater
 	};
 	
 });
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/material', ['./utils'], function(utils) {
+
+	//IE polyfills
+	if (!Array.prototype.includes){
+		Array.prototype.includes = function(value){
+			for (var i = 0; i < this.length; i++) {
+				if (this[i] === value) return true;
+			}
+			return false;
+		}
+	}
+
+	/**Contains functions for accessing & manipulating the currently open material & material page
+	 * @namespace material*/
+
+	/**A callback for functions that output arbitrary data
+	 * @memberof material
+	 * @callback anyCallback
+	 * @param {any} value	The requested value*/
+
+	/**A callback for functions that output integer data
+	 * @memberof material
+	 * @callback intCallback
+	 * @param {int} value	The requested value*/
+
+	/**A callback for functions that output page data
+	 * @memberof material
+	 * @callback pageCallback
+	 * @param {?material.Page} page	The requested page or null if the page is not available*/
+	
+	/**A callback for that listens for page updates
+	 * @memberof material
+	 * @callback pageUpdateCallback
+	 * @param {material.Page} page	The requested page or null if the page is not available
+	 * @param {string[]} [fields]	A list containing the names of fields that were updated*/
+
+	/**A callback for functions that output material data
+	 * @memberof material
+	 * @callback materialCallback
+	 * @param {material.Material} material	The requested material*/
+
+	/**A callback for functions that output extra page data
+	 * @memberof material
+	 * @callback extraPageCallback
+	 * @param {material.ExtraPage} page	The extra page*/
+
+	/**A callback for functions that output a list of pages
+	 * @memberof material
+	 * @callback pageListCallback
+	 * @param {material.Page[]} pages		The requested pages
+	 * @param {boolean} [containsCurrent]	If present, indicates whether or not the list contains the currently open page*/
+
+	/**A callback for functions that output a list of permissions
+	 * @memberof material
+	 * @callback permissionListCallback
+	 * @param {material.Permission[]} permissions	The requested permissions*/
+	
+	/**A callback for function that outputs a list of material's ISBNs
+	 * @memberof material
+	 * @callback materialISBNsCallback 
+	 * @param {material.Material.isbns} materialISBNs	requested list of material's ISBNs*/
+
+	/**A callback that is invoked when the current material has been resolved
+	 * @memberof material
+	 * @callback materialReadyListener*/
+
+	/**A callback that is invoked whenever the displayed page is changed
+	 * @memberof material
+	 * @callback pageChangeListener
+	 * @param {material.Page} page					The new page
+	 * @param {material.PageChangeOptions} options	The page change options
+	 * @param {Object} data							Arbitrary metadata passed with the original page change request*/
+
+	/**A callback that is invoked before the displayed page is changed
+	 * @memberof material
+	 * @callback beforePageChangeListener
+	 * @param {material.Page} page					The new page
+	 * @param {material.PageChangeOptions} options	The page change options object
+	 * @return {Promise}							A promise that should be resolved when the new page can safely be loaded*/
+
+	/**A callback for functions that output a playlist
+	 * @memberof material
+	 * @callback playlistCallback
+	 * @param {?material.Playlist} playlist	The requested playlist or null if the playlist is not available*/
+	
+	/**A callback for functions that output metadata
+	 * @memberof material
+	 * @callback metadataCallback
+	 * @param {material.Metadata} metadata			The requested metadata or null if material is not available*/
+
+	/**A function that is used to redirect the user from certain pages to others
+	 * @memberof material
+	 * @typedef {function} pageMapper
+	 * @param {string} pageID	The ID of the page to redirect from
+	 * @return {string}	The ID of the page to redirect to*/
+
+	/**The loading status for an individual product page
+	 * @ignore
+	 * @typedef {Object} LoadingStatus
+	 * @property {boolean} failed					true if loading this page failed, false otherwise
+	 * @property {material.pageCallback[]} buffer	An array of callbacks to invoke when loading finishes*/
+
+	/**An object that globally identifies a specific product page
+	 * @memberof material
+	 * @typedef {Object} PageID
+	 * @property {string} materialId	The ID of the product containing the page
+	 * @property {string} pageId		The ID of the page within the product
+	 * @property {Object} data			Data to pass to listeners when the page is loaded*/
+
+	/**An object specifying extra options for a page change operation
+	 * @memberof material
+	 * @typedef {Object} PageChangeOptions
+	 * @property {boolean} [addPageToHistory=true]		If true, the page state will be added to browser history
+	 * @property {boolean} [ignorePageMappers=false]	If true, the page ID should be processed raw, ignoring any active page mapper function
+	 * @property {boolean} [loadContent=true]			If true, the page content will be loaded into the browser in place of the previously displayed page
+	 * @property {boolean} [back=false]					If true and the specified page is hidden, its closest visible ancestor page will be loaded instead.
+	 * 													Otherwise, if the page is hidden, its first child will be loaded*/
+
+	/**An object representing a product page
+	 * @memberof material
+	 * @typedef {Object} Page
+	 * @property {string} title					The title of the page
+	 * @property {string} shortTitle			The short title of the page
+	 * @property {string} desc					The description of the page
+	 * @property {string} id					The ID of this page
+	 * @property {string} identifier			The identifier of this page
+	 * @property {string} url					The complete URL of this page
+	 * @property {string} contentUrl			The URL to load this page's content only
+	 * @property {int} level					The page's level in the page hierarchy
+	 * @property {string[]} breadcrump			The page's breadcrumb in the page hierarchy as an ordered list of page IDs
+	 * @property {string} colorHex				The color hex of the page
+	 * @property {string} group					The group of this page
+	 * @property {string} [imageUrl]			The url for the page image of this page
+	 * @property {boolean} navigation			True if this page is a navigation page
+	 * @property {int} pageIndex				The page index of the page
+	 * @property {int} pageNumber				The page number of the page
+	 * @property {string} contentType			The content type of the page
+	 * @property {string} subContentType		The content subtype of the page
+	 * @property {boolean} hidden				True if the page is hidden
+	 * @property {boolean} hideFromChildren		True if the page is hidden from its children
+	 * @property {boolean} hideFromNavigation	True if the page is hidden from navigation
+	 * @property {boolean} inactive				True if the page is inactive
+	 * @property {string[]} childPages			An array of the IDs of the page's child pages
+	 * @property {string[]} tags				An array of the page's tags
+	 * @property {string[]} contentTags			An array of the page's content tags
+	 * @property {string[]} styleClasses		An array of the page's style classes
+	 * @property {int} siblingId				The sibling ID of the page
+	 * @property {int} currentChildId			The current child ID of the page
+	 * @property {material.LockState} lockState	The lock state of the page.
+	 * @property {material.LockReason[]} lockReasons	If the page is locked, contains reasons explaining why
+	 * @property {Object} scores				The user's current scores on this page
+	 * @property {int} scores.score			The current user score on this page
+	 * @property {int} scores.scoreMax		The maximum score on this page
+	 * @property {float} scores.progress	The user's progress through this page on a scale of 0 to 1
+	 * @property {boolean} scores.visited	True if the user has visited this page, false otherwise
+	 * @property {int} scores.stars			The current number of stars the user has on this page
+	 * @property {int} scores.starsMax		The maximum number of stars on this page */
+
+	/**An object representing a single product
+	 * @memberof material
+	 * @typedef {Object} Material
+	 * @property {string} title					The title of the product
+	 * @property {string} id					The ID of the product
+	 * @property {string} languageId			The language info of the product
+	 * @property {string[]} isbns				An array of the product's ISBNs
+	 * @property {string} lastUpdated 			The time when the material was last edited*/
+	
+	/**Represents a page outside the normal material structure
+	 * @memberof material
+	 * @typedef {Object} ExtraPage
+	 * @property {string} pageUrl			The URL to access the page directly
+	 * @property {string} pageContentUrl	The URL to access the page content only
+	 * @property {string} languageKey		The language key used to translate the page name*/
+	
+	/**A string indicating the lock state of a page.
+	 * Possible values are OPEN (allow access), 
+	 * PREVIOUSLY_LOCKED (this page has been locked at some point but is now open),
+	 * SHOW_IN_NAVIGATION_ONLY (no access but should be visible in navigation)
+	 * and LOCKED (no access, hide from navigation).
+	 * @memberof material
+	 * @typedef {String} LockState*/
+	
+	/**An object representing a reason that a page is locked
+	 * @memberof material
+	 * @typedef {Object} LockReason
+	 * @property {string} [name]					A human-readable title for the reason
+	 * @property {string} [description]				A human-readable description of the reason
+	 * @property {string} [imageUrl]				A URL that can be used to show an image representing the reason
+	 * @property {string} type						The type identifier of this reason
+	 * @property {material.LockReason[]} subreasons	An array of sub-reasons such as alternative unlock conditions*/
+	
+	/**An object representing a page's lock state and possible reasons that the page is locked
+	 * @memberof material
+	 * @typedef {Object} LockAndReason
+	 * @property {material.LockState} lockState			The lock state of the page.
+	 * @property {material.LockReason[]} lockReasons	An array of reasons explaining why the page is locked*/
+
+	/**An object representing a playlist
+	 * @memberof material
+	 * @typedef {Object} Playlist
+	 * @property {string} id						The ID of the playlist
+	 * @property {string} name						The name of the playlist
+	 * @property {string} description				The description of the playlist
+	 * @property {boolean} visible					If true, anyone with the code can open the playlist
+	 * @property {string} shareCode					The share code of the playlist
+	 * @property {long} creator						The user ID of the creator of the playlist
+	 * @property {material.PlaylistPage[]} pages	An array of pages in the list*/
+	
+	/**An object representing metadata of a material
+	 * @memberof material
+	 * @typedef {Object} Metadata
+	 * @property {string} previewURL				The preview URL of the material
+	 * @property {string} schoolSubject				The school subject of the material
+	 * @property {string} isbn						The isbn code of the material
+	 * @property {string} description				The description of the material
+	 * @property {string} title						The title of the material
+	 * @property {string} type						The type of the material
+	 * @property {string} locale					The locale of the material
+	 * @property {string} classLevel				The classLevel of the material
+	 * @property {Object[]} materialTypeMetadata	An array of arbitrary metadata
+	 * @property {string} basenumber				The base number of the material
+
+	/**A single page in a playlist
+	 * @memberof material
+	 * @typedef {Object} PlaylistPage
+	 * @property {string} materialId			The material ID of this playlist page
+	 * @property {string} pageId				The page ID of this playlist page
+	 * @property {string} [relatedContentId]	The related content ID of this playlist page*/
+
+	/**A source for pageIds to use with the {@link changeToNextPage} and {@link changeToPreviousPage} functions
+	 * @memberof material
+	 * @typedef {Object} PageSource
+	 * @property {material.pageIDProvider} getNextPageId		Gets the ID of the next page
+	 * @property {material.pageIDProvider} getPreviousPageId	Gets the ID of the previous page*/
+
+	/**A function that provides a page ID
+	 * @memberof material
+	 * @typedef {Function} pageIDProvider
+	 * @param {material.pageCallback} callback	A function to receive the ID*/
+
+	/**A function that determines achievements based on page data
+	 * @memberof material
+	 * @typedef {Function} AchievementCalculator
+	 * @param {material.Page} page	The page data
+	 * @return {Object}	The achievement data*/
+
+	/**A function that renders pages of given content type.
+	 * @memberof material
+	 * @typedef {Function} PageContentTypeRenderer
+	 * @param {material.Page} page	The page data to render
+	 * @param {string} containerId  The id of the DOM element to render the page into.
+	 * @param {Function} callback  Function to call when page has been rendered.*/
+
+	/**Indicates permissions that a user has to a material. Possible values;
+	 * <ul>
+	 * <li><b>DELETE</b>: The user can delete the material</li>
+	 * <li><b>DUPLICATE</b>: The user can duplicate the material</li>
+	 * <li><b>EDIT</b>: The user can edit the material</li>
+	 * <li><b>PARTICIPATE</b>: The user can view the material</li>
+	 * <li><b>PUBLISH</b>: The user can publish the material</li>
+	 * <li><b>SHARE</b>: The user can share the material</li>
+	 * <li><b>REPORT</b>: The user can view reports in the material</li>
+	 * @memberof material
+	 * @typedef {string} Permission*/
+
+
+	var loadedPages = {};
+	var pageLoadingInProgress = false;
+	var loadedPageCallbackBuffer = {};
+	var gamification = {};
+	var performanceHints = {
+			skipLoadingScores: false
+	};
+
+	var extraPageChangeListeners = [];
+
+	var currentPageId = null;
+	var lastPageId = null;
+	var pageMappers = {};
+	var pageChangeListeners = [];
+	var pageStartsLoadingListeners = [];
+	var pageUpdatedListeners = [];
+	var renderers = {};
+	var pageCustomDatas = {};
+	var ajaxLoadEnabled = true;
+	var fontSize = 0;
+	var fontSizeListeners = [];
+	var materialReadyListeners = [];
+	var pageContentTypeRenderers = {};
+
+	/**The ID of the material containing the current page*/
+	var currentMaterialId = null;
+	/**The content type of the material containing the current page*/
+	var currentMaterialContentType = null;
+	/**@deprecated call getPage with an object containing the materialId instead.
+	 * If not null, overrides the requestedMaterial from getRequestedMaterial*/
+	var currentRequestedMaterial = null;
+	/**An array of listener functions called whenever the current playlist changes*/
+	var playlistChangeListeners = [];
+	/**The currently active playlist, if any*/
+	var currentPlaylist = null;
+
+	/**The object currently used to get the next and previous pages*/
+	var currentPageSource = new DefaultPageSource();
+
+	/**An array of permissions that the user has for the current material*/
+	var materialPermissions = null;
+
+	/**An object of metadata for the current material */
+	var metadata = null;
+
+	/**Creates an object that traverses through the current material*/
+	function DefaultPageSource(){};
+	//Gets the next page in the material
+	DefaultPageSource.prototype.getNextPageId = function(callback){
+
+		getCurrentPage( function( currentPage ){
+
+			if ( currentPage != null ) {
+
+				getPageLevelPages( currentPage.id, function( pages ){
+					var pageIndex = getPageIndex(currentPage, pages);
+					console.log(pages, pageIndex)
+					while ( pageIndex < pages.length - 1 ){
+						pageIndex++;
+						var possible = pages[pageIndex];
+						if (!possible.inactive && possible.lockState !== 'LOCKED' && possible.lockState !== 'SHOW_IN_NAVIGATION_ONLY'){
+							callback(possible.id);
+							return;
+						}
+					}
+					callback(null);
+
+				});
+
+			}
+
+		});
+	}
+	//Gets the previous page in the material
+	DefaultPageSource.prototype.getPreviousPageId = function(callback){
+		getCurrentPage( function( currentPage ){
+
+			if ( currentPage != null ) {
+
+				getPageLevelPages( currentPage.id, function( pages ){
+					var pageIndex = getPageIndex(currentPage, pages);
+					while ( pageIndex > 0 ){
+						pageIndex--;
+						var possible = pages[pageIndex];
+						if (!possible.inactive && possible.lockState !== 'LOCKED' && possible.lockState !== 'SHOW_IN_NAVIGATION_ONLY'){
+							callback(possible.id);
+							return;
+						}
+					}
+					callback(null);
+
+				});
+
+			}
+
+		});
+	}
+	/**Creates an object that traverses through pages from the current playlist*/
+	function PlaylistPageSource(){
+		//Initialize page index to -1 so that the first call to getNextPageId()
+		//returns the ID of the first page
+		this.pageIndex = -1;
+	}
+	//Gets the ID of the next playlist page
+	PlaylistPageSource.prototype.getNextPageId = function (callback){
+		//Stop if we've reached the end of the playlist
+		if (this.pageIndex >= currentPlaylist.pages.length -1){
+			callback(null);
+		}
+		else {
+			//Find the next page
+			var nextPage = currentPlaylist.pages[this.pageIndex +1];
+			//Increment current page index
+			this.pageIndex++;
+
+			//Format page data
+			var pageData = {
+					materialId: nextPage.materialId,
+					pageId: nextPage.pageId,
+					urlParams: {
+						openPlaylist: currentPlaylist.id,
+						playlistPage: this.pageIndex
+					},
+					numericMaterialId: nextPage.numericMaterialId
+			}
+			//Include any related content data
+			if (nextPage.relatedContentId){
+				pageData.data = {
+						relatedContentId: nextPage.relatedContentId,
+						relatedContentShowInline: true,
+						playlistId : currentPlaylist.id
+				}
+				pageData.urlParams.relcontent = nextPage.relatedContentId
+			}
+
+			//Send back an object containing the material and page IDs of the next page
+			callback(pageData);
+		}
+	}
+	//Gets the ID of the previous playlist page
+	PlaylistPageSource.prototype.getPreviousPageId = function (callback){
+		//Stop if we've reached the beginning of the playlist
+		if (this.pageIndex <= 0){
+			callback(null);
+		}
+		else {
+			//Find the previous page
+			var prevPage = currentPlaylist.pages[this.pageIndex -1];
+			//Decrement current page index
+			this.pageIndex--;
+
+			//Format page data
+			var pageData = {
+					materialId: prevPage.materialId,
+					pageId: prevPage.pageId,
+					urlParams: {
+						openPlaylist: currentPlaylist.id,
+						playlistPage: this.pageIndex
+					},
+					numericMaterialId: prevPage.numericMaterialId
+			}
+			//Include any related content data
+			if (prevPage.relatedContentId){
+				pageData.data = {
+						relatedContentId: prevPage.relatedContentId,
+						relatedContentShowInline: true,
+						playlistId : currentPlaylist.id
+				}
+				pageData.urlParams.relcontent = prevPage.relatedContentId
+			}
+
+			//Send back an object containing the material and page IDs of the previous page
+			callback(pageData);
+		}
+	}
+
+	PlaylistPageSource.prototype.setCurrentPageIndex = function(index){
+		this.pageIndex = index;
+	}
+
+	PlaylistPageSource.prototype.getCurrentPageIndex = function(){
+		return this.pageIndex;
+	}
+
+	var _achievementCalculator = function(page) {
+
+		var achievement = {
+			elements: 0,
+			elementsMax: 0
+		};
+
+		if ( page.scores ) {
+
+			var scores = page.scores;
+
+			if ( scores.scoreMax > 0 ) {
+
+				achievement.elementsMax = 3;
+
+				var percentage = (scores.score / scores.scoreMax) * 100;
+
+				achievement.elements = percentage == 0 ? 0 : percentage <= 34 ? 1 : percentage <=67 ? 2 : 3;
+
+			} else {
+
+				achievement.elementsMax = 1;
+
+				// is visited
+				if ( scores.visited ) {
+					achievement.elements = 1;
+				}
+
+			}
+
+		}
+
+		return achievement;
+
+	};
+
+	/**Gets the requested material string of the current page.
+	 * The requested material string encodes both the material ID as well as the view mode.
+	 * @memberof material
+	 * @return {?string}	The requested material string, if available*/
+	function getRequestedMaterial() {
+		//Use an override material if one has been set
+		if (currentRequestedMaterial){
+			return currentRequestedMaterial;
+		}
+		//Otherwise get the material from the URL
+		var requestedMaterial = utils.getUrlParameter("material");
+
+		if ( requestedMaterial ) {
+			return requestedMaterial;
+		} else {
+			var start = location.pathname.indexOf("/state-");
+			if ( start != -1 ) {
+				var end = location.pathname.indexOf("/", start+1);
+				return location.pathname.substring(start+7, end);
+			}
+		}
+
+		return null;
+
+	}
+
+	/**Gets the page loading status for a page if and only if it exists.
+	 * @param {string} materialId	The ID of the material containing the page
+	 * @param {string} pageId		The ID of the page
+	 * @return {material.LoadingStatus|undefined}	The loading status for the page or undefined if the status has not been set*/
+	function readLoadingStatus(materialId, pageId){
+		if (loadedPageCallbackBuffer[materialId]){
+			return loadedPageCallbackBuffer[materialId][pageId];
+		}
+		else {
+			return undefined;
+		}
+	}
+
+	/**Sets the page loading status for a page.
+	 * @param {string} materialId				The ID of the material containing the page
+	 * @param {string} pageId					The ID of the page
+	 * @param {material.LoadingStatus} status	The loading status to set for the page*/
+	function writeLoadingStatus(materialId, pageId, status){
+		//If the buffer has no entry for this material, create one
+		if (!loadedPageCallbackBuffer[materialId]){
+			loadedPageCallbackBuffer[materialId] = {};
+		}
+		//Add the status to the buffer
+		loadedPageCallbackBuffer[materialId][pageId] = status;
+	}
+
+	/**Gets the loading status for a material page
+	 * @param {string|material.PageID} page	Either the string ID of the page or a page data object identifying the material and the page
+	 * @return {material.LoadingStatus}	The loading status for the specified page*/
+	function getPageLoadingStatus(page) {
+		//Resolve page & material IDs
+		var pageId;
+		var materialId;
+
+		if (typeof(page) === "object"){
+			pageId = page.pageId;
+			materialId = page.materialId;
+		}
+		else {
+			pageId = page;
+			materialId = getRequestedMaterial();
+		}
+
+		//If no status exists, create an empty one
+		if ( !readLoadingStatus(materialId, pageId) ) {
+
+			writeLoadingStatus(materialId, pageId, {
+				failed: false,
+				buffer: []
+			});
+
+		}
+
+		return readLoadingStatus(materialId, pageId);
+
+	}
+
+	function loadPagesWithLevel(loadPagesByLevel, callback) {
+		if ( currentPageId ) {
+			loadPage(currentPageId, loadPagesByLevel, callback);
+		} else {
+			callback(null);
+		}
+	}
+
+	function loadPage(pageId, loadPagesByLevel, callback) {
+		//Get current loading status
+		var loadingStatus = getPageLoadingStatus(pageId);
+
+		//If we've already attempted to load the page and failed, return null
+		if ( loadingStatus.failed ) {
+			callback(null);
+			return;
+		}
+
+		//Otherwise add the callback to a buffer of functions to call when the page loads
+		loadingStatus.buffer.push(callback);
+
+		//If we're currently loading a page, wait for the load to finish
+		if ( pageLoadingInProgress ) {
+			return;
+		}
+
+		//Otherwise load the page immediately
+		doLoadPage(pageId, loadPagesByLevel);
+
+	}
+
+	function doLoadPage(page, loadPagesByLevel) {
+		var pageId;
+		var requestedMaterial;
+
+		if (typeof(page) === "object"){
+			pageId = page.pageId;
+			requestedMaterial = page.materialId;
+		}
+		else {
+			pageId = page;
+			requestedMaterial = getRequestedMaterial();
+		}
+	
+		pageLoadingInProgress = true;
+
+		/* If Analytics Framework is installed, pages-for-analytics endpoint is called. If the server is 
+		configured to not load scores, pages-for-analytics endpoint is also called, but without the Framework. */
+		var action = "pages-for-analytics";
+
+		/* If Analytics Framework is not installed and skipLoadingScores is false,
+		pages-with-scores endpoint will be called, if it so configured on the server. */
+		if (loadPageScores() && !performanceHints.skipLoadingScores) {
+			if (!isAnalyticsFrameworkInstalled()) {
+				action = "pages-with-scores";
+			}
+		/* If the theme wants to skip loading scores completely, pages endpoint is called. */
+		} else if (performanceHints.skipLoadingScores) {
+			action = "pages";
+		}
+
+		/* Fetch page scores with getTaskStatus() with the payload if Analytics Framework
+		is installed and if skipLoadingScores is false. */
+		var scores;
+		if(!performanceHints.skipLoadingScores) {
+			if (isAnalyticsFrameworkInstalled() && !doNotLoadFromAnalytics()) {
+				var payload = {
+					material: Cloubi.currentMaterial.uuid,
+					users: [Cloubi.currentUser.uuid]
+				}
+				scores = getTaskStatus(payload);
+			}
+		}
+
+		var url = "/o/site-material-api/" + action + "/" + encodeURIComponent(requestedMaterial) + "/" + encodeURIComponent(pageId);
+		if (loadPagesByLevel) {
+			url = url + "/" + encodeURIComponent(loadPagesByLevel);
+		}
+		
+		utils.get(url, function(data) {
+			/* If Analytics Framework is installed and scores are ready, 
+			then calculate the scores for each page using data from AF. */
+			if (typeof(scores) != "undefined" && !performanceHints.skipLoadingScores) {
+				scores.then(
+					function(taskStatus) {
+						for(var pageProperty in data.pages) {
+							var pageObject = data.pages[pageProperty];
+							var pageScores = taskStatus.filter(function(value) {
+								return value.pageId === pageObject.uuid;
+							});
+
+							// Ignore ATP-packages since their scores are not stored in analytics
+							if(pageScores && pageScores.length
+								&& pageObject.contentType !== 'cloubi/adaptivetaskpackage') {
+								computePageScores(pageObject.scores, pageScores);
+							}
+						}
+						loadPages();
+					},
+					function(error) {
+						console.log(error);
+					}
+				)
+			} else {
+				/* If Analytics Framework is not installed, or skipLoadingScores or
+				doNotLoadFromAnalytics are true, just load pages. */
+				loadPages();
+			}
+
+			function loadPages() {
+				pageLoadingInProgress = false;
+				if (!loadedPages[requestedMaterial]){
+					loadedPages[requestedMaterial] = {};
+				}
+	
+				var hasRequestedPage = false;
+				if ( data.pages ) {
+					var existing = 0;
+					var newPages = 0;
+					jQuery.each(data.pages, function(id, page) {
+						if ( id == pageId ) {
+							hasRequestedPage = true;
+						}
+						if ( loadedPages[requestedMaterial][id] ) {
+							existing++;
+						} else {
+							newPages++;
+							loadedPages[requestedMaterial][id] = page;
+						}
+					});
+				}
+	
+				//Store material info
+				if ( data.materialId ) {
+					loadedPages[requestedMaterial]._materialId = data.materialId;
+				}
+				if ( data.materialContentType ) {
+					loadedPages[requestedMaterial]._contentType = data.materialContentType;
+				}
+				if ( data.lastPageId ) {
+					lastPageId = data.lastPageId;
+				}
+				if (!hasRequestedPage){
+					// console.log("WARNING: Requested page " + pageId + " was not present in response");
+					if ( readLoadingStatus(requestedMaterial, pageId) ){
+						/* If the specific page requested was not in the response, mark loading
+						status as failed. Otherwise invokeBufferedPageLoads() may attempt
+						to load it again, causing an infinite loop. */
+						readLoadingStatus(requestedMaterial, pageId).failed = true;
+					}
+				}
+				invokeBufferedPageLoads();
+			}
+		});
+	}
+
+	/* Fetches page scores from task status microservice. */
+	function getTaskStatus(payload) {
+		return new Promise(function(resolve, reject) {
+			utils.post("/o/analytics-framework/progress-status", payload,
+				function(response) {
+					resolve(response);
+				},
+				function() {
+					reject("Error while fetching task scores");
+				}
+			);
+        });
+	}
+
+	/* Computes the sum of scores, progress and stars for each page from the tasks. */
+	function computePageScores(scores, taskStatus) {
+		var scoreSum = 0;
+		var progressSum = 0;
+		taskStatus.forEach(function(taskScore) {
+			scoreSum += taskScore.score;
+			progressSum += taskScore.progress;		
+		});
+		//If the page has any task data, assume that it is visited
+		//(this is strictly speaking not true because of linked tasks, but there's no way to check for sure
+		//without sacrificing performance yet).
+		if (taskStatus.length > 0) {
+		    scores.visited = true;
+		}
+		scores.score = scoreSum;
+		// Calculate progress
+		if (scores.tasks > 0) {
+		    //Analytics returns scores as percentages, so divide by 100 to get a value between 0-1
+			scores.progress = (progressSum / scores.tasks) / 100;
+		} else {
+			scores.progress = 0;
+		}
+		// Calculate stars
+		var percent;
+		if (scores.scoreMax > 0) {
+			percent = (scoreSum / scores.scoreMax);
+		} else {
+			percent = 0;
+		}
+		if ( percent < 0.01 ) {
+			scores.stars = 0;
+		} else if ( percent < 0.34 ) {
+			scores.stars = 1;
+		} else if ( percent < 0.67 ) {
+			scores.stars = 2;
+		} else {
+			scores.stars = 3;
+		}
+	}
+
+	/** Gets list of material's ISBNs as {@link MaterialISBNs} object
+	 * @memberof material
+	 * @param {material.materialISBNsCallback} callback		A callback to receive the data*/
+	function getMaterialISBNs(callback) {
+		if ( self.Cloubi && Cloubi.currentMaterial && Cloubi.currentMaterial.isbns ) {
+			callback(Cloubi.currentMaterial.isbns);
+		}
+		else {
+			callback([]);
+		}
+	}
+
+	/**Gets a page with specific material and page IDs if and only if the page is cached.
+	 * @param {string} requestedMaterial	The encoded material ID of the material containing the page
+	 * @param {string} pageId				The page ID of the page
+	 * @return {material.Page|undefined}	An object representing the page or undefined if no such page exists in the cache*/
+	function getCachedPage(requestedMaterial, pageId){
+		if (loadedPages[requestedMaterial]){
+			return loadedPages[requestedMaterial][pageId];
+		}
+		else {
+			return undefined;
+		}
+	}
+
+	function invokeBufferedPageLoads() {
+
+		var nextToLoad = null;
+		var callbacksToInvoke = [];
+
+		jQuery.each(loadedPageCallbackBuffer, function(requestedMaterial, pages) {
+			jQuery.each(pages, function(pageId, status) {
+				var buffer = status.buffer;
+				if ( buffer.length > 0 ) {
+					var cachedPage = getCachedPage(requestedMaterial, pageId);
+					if ( status.failed || cachedPage ) {
+						status.buffer = [];
+						var page = null;
+						if ( cachedPage ) {
+							page = cachedPage;
+						}
+						jQuery.each(buffer, function(index, callback) {
+							callbacksToInvoke.push({callback: callback, page: page});
+						});
+					} else {
+						nextToLoad = {pageId: pageId, materialId: requestedMaterial};
+					}
+				}
+			});
+		});
+
+		jQuery.each(callbacksToInvoke, function(index, what) {
+			what.callback(what.page);
+		});
+
+		if ( nextToLoad && !pageLoadingInProgress ) {
+			doLoadPage(nextToLoad, null);
+		}
+
+	}
+
+
+	/**Gets the current gamification status
+	 * @memberof material
+	 * @param {material.anyCallback} callback	A callback to receive the data*/
+	function getGamificationStatus(callback) {
+
+		var requestedMaterial = getRequestedMaterial();
+
+		if ( requestedMaterial ) {
+
+			utils.get("/o/cloubi-gamification/status/" + encodeURIComponent(requestedMaterial), function(data) {
+
+				gamification['status'] = data;
+
+				callback(data);
+
+			});
+
+		} else {
+
+			callback( gamification['status'] );
+
+		}
+
+	}
+
+	/**Locally updates the scores of a page.
+	 * NOTE: the scores are updated in the frontend only and are not persisted in any way.
+	 * @memberof material
+	 * @param {material.Page} page	The page object to update
+	 * @param {int} score			The user score to set
+	 * @param {int} scoreMax		The maximum page score to set
+	 * @param {float} progress		The user progress in the page, from 0 (not started) to 1 (finished)
+	 * @param {boolean} visited		True if the user has visited the page, false otherwise
+	 * @param {int} stars			The number of stars the user has earned on the page
+	 * @param {int} starsMax		The maximum number of stars the user can earn on the page*/
+	function updatePageScore(page, score, scoreMax, progress, visited, stars, starsMax) {
+
+		page.scores = page.scores || {};
+
+		console.log("Scores updated on page " + page.id + ": score " + score + "/" + scoreMax + ", progress " + progress + ", visited " + visited + ", stars " + stars + ", starsMax " + starsMax);
+
+		page.scores.scoreMax = scoreMax;
+		page.scores.score = score;
+		page.scores.progress = progress;
+		page.scores.visited = visited;
+		page.scores.stars = stars;
+		page.scores.starsMax = starsMax;
+
+		triggerPageChanged(page, ["scores"]);
+
+	}
+	
+	/**Updates the lock state of a page
+	 * @memberof material
+	 * @param {string} pageId						The ID of the page to update
+	 * @param {material.LockState} lockState		The new lock state of the page
+	 * @param {material.LockReason[]} lockReasons	The new lock reasons of the page*/
+	function updatePageLockState(pageId, lockState, lockReasons){
+		var promise = new $.Deferred();
+		if (lockState !== 'LOCKED') {
+			var loadingStatus = readLoadingStatus(getRequestedMaterial(), pageId);
+			if (loadingStatus){
+				loadingStatus.failed = false; //If we tried to load the page before and failed, retry
+			}
+			//Load page
+			getPage(pageId, function(page) {
+				if (page) {
+					//Ensure the page is at the correct index in its parent's child pages
+					var parentPageId = getParentPageId(page);
+					if (parentPageId){
+						getPage(parentPageId, function(parent){
+							if (parent && parent.childPages && !parent.childPages.includes(pageId) ){
+								getPageChildPages(parentPageId, {includeHiddenChildPages: true}, function(children){
+									parent.childPages.splice(getPageIndex(page, children), 0, pageId);
+									triggerPageChanged(parent, ["childPages"]);
+								})
+							}
+							promise.resolve(page);
+						})
+					}
+					else {
+						promise.resolve(page);
+					}
+				}
+				else {
+					promise.resolve();
+				}
+			});
+		}
+		else {
+			getPage(pageId, promise.resolve);
+		}
+		promise.then(function(page){
+			if (page) {
+				page.lockState = lockState;
+				page.lockReasons = lockReasons;
+				page.inactive = (lockState === "LOCKED");
+				
+				triggerPageChanged(page, ["lockState", "lockReasons", "inactive"]);
+			}
+		});
+	}
+	
+	function getPageIndex(page, pages) {
+		for (var i = 0; i < pages.length; i++){
+			if (page.id === pages[i].id || pages[i].pageIndex > page.pageIndex){
+				return i;
+			}
+		}
+		return pages.length;
+	}
+	
+	function updatePage(page, data){
+		var updated = [];
+		$.each(data, function(key, val){
+			if (page.hasOwnProperty(key) && !utils.deepEqual(page[key], val)) {
+				console.log("updating field " + key, page[key], "->", val)
+				page[key] = val;
+				updated.push(key);
+			}
+		})
+		console.log("Updated fields ", updated)
+		triggerPageChanged(page, updated);
+	}
+
+	/**Locally marks a page as visited
+	 * NOTE: the page is marked in the frontend only and the change is not persisted in any way
+	 * @memberof material
+	 * @param {material.Page} page	The page to mark*/
+	function markPageVisited(page) {
+
+		page.scores = page.scores || {};
+
+		console.log("Mark page " + page.id + " as visited");
+
+		page.scores.visited = true;
+
+		triggerPageChanged(page, ["scores.visited"]);
+
+	}
+
+	/**Locally updates a page's scores from a JS object
+	 * NOTE: the scores are updated in the frontend only and are not persisted in any way.
+	 * @memberof material
+	 * @param {material.Page} page		The page to update
+	 * @param {material.Page#scores} data	The updated scores*/
+	function updatePageScoreFromJSON(page, data) {
+
+		updatePageScore(page, data.score, data.scoreMax, data.progress, data.visited, data.stars, data.starsMax);
+
+	}
+
+	/**Gets the latest scores for a page from the server
+	 * @memberof material
+	 * @param {material.Page} page	The page to refresh*/
+	function refreshPageScores(page) {
+
+		if ( !page ) {
+			return;
+		}
+
+		var requestedMaterial = getRequestedMaterial();
+
+		var url = "/o/site-material-api/page-scores/" + encodeURIComponent(requestedMaterial) + "/" + encodeURIComponent(page.id);
+
+		utils.get(url, function(data) {
+			page.scores = Object.assign(page.scores || {}, data);
+			triggerPageChanged(page, ["scores"]);
+		});
+
+	}
+
+	/**Calls listeners to signal that page data has changed
+	 * @memberof material
+	 * @param {material.Page} page	The updated page
+	 * @param {string[]} [fields]	A list of fields that were updated*/
+	function triggerPageChanged(page, fields) {
+
+		jQuery.each(pageUpdatedListeners, function(index, func) {
+			func(page, fields);
+		});
+
+	}
+
+	/**Gets a list containing the requested page's child pages
+	 * @memberof material
+	 * @param {string|material.PageID} parentPageId	The ID of the parent page
+	 * @param {Object} [options]					An object specifying additional options on the pages to include
+	 * @param {boolean} [options.includeHiddenChildPages=false]	If true, hidden pages will be included in the results
+	 * @param {material.pageListCallback} callback	A callback function that receives the list of child pages*/
+	function getPageChildPages(parentPageId, options, callback) {
+
+		var childPages = [];
+
+		if (!options) options = {};
+
+		options = jQuery.extend({includeHiddenChildPages: false}, options);
+
+		getPage(parentPageId, function(parentPage) {
+			
+			if (parentPage.childPages.length > 0) {
+
+				var hideChildPages = !options.includeHiddenChildPages && parentPage.hideFromChildren ? true : false;
+				
+				var promises = []
+				// get pages
+				jQuery.each(parentPage.childPages, function(_, pageId) {
+					var promise = new jQuery.Deferred()
+					getPage(pageId,function(childPage) {
+						if (!hideChildPages && !childPage.hidden && !childPage.inactive) {
+							childPages.push(childPage);
+						}
+						
+						promise.resolve();
+					});
+				
+					promises.push(promise);
+				});
+
+				jQuery.when.apply(jQuery, promises).then(function() {
+					callback(childPages)
+				});
+				
+			} else {
+				callback(childPages);
+			}
+
+
+		});
+	}
+
+	/**Gets a list containing the requested page and all of its sibling pages
+	 * @memberof material
+	 * @param {string|material.PageID} pageId		The ID of the page
+	 * @param {material.pageListCallback} callback	A callback function that receives the list of sibling pages*/
+	function getPageLevelPages(pageId, callback) {
+
+		var levelPages = [];
+
+		getPage( pageId, function(page) {
+
+			if ( page &&  page.breadcrump.length > 1 ) {
+
+				var parentPageId = page.breadcrump[page.breadcrump.length-2];
+
+				getPageChildPages(parentPageId, {includeHiddenChildPages: true}, callback);
+
+			} else {
+
+				callback(levelPages);
+
+			}
+
+		} );
+
+	}
+
+	/**Gets a material page object, loading it from the server if necessary
+	 * @memberof material
+	 * @param {string|material.PageID} page		Either the page ID string of a page in the current material or an object identifying the page
+	 * @param {material.pageCallback} callback	A function to be called with the result after this function finishes.*/
+	function getPage(page, callback) {
+
+		var pageId;
+		var materialId;
+
+		if (typeof(page) === "object"){
+			pageId = page.pageId;
+			materialId = page.materialId;
+		}
+		else {
+			pageId = page;
+			materialId = getRequestedMaterial();
+		}
+
+		if ( getCachedPage(materialId, pageId) ) {
+
+			callback( getCachedPage(materialId, pageId) );
+
+		} else {
+
+			loadPage(page, null, callback);
+
+		}
+
+	}
+
+	/**Gets the root {@link Page} object of the current material structure
+	 * @memberof material
+	 * @param {material.pageCallback} callback  A callback function to invoke with the page*/
+	function getRootPage(callback) {
+
+		getCurrentPage(function(page) {
+			if (page) {
+				var rootPageId = page.breadcrump[0];
+				getPage(rootPageId, callback);
+			} else {
+				callback(null);
+			}
+		});
+
+	}
+
+	/**Gets the {@link Page} object of the currently visible material page
+	 * @memberof material
+	 * @param {material.pageCallback} callback	A callback function to invoke with the page*/
+	function getCurrentPage(callback) {
+
+		if ( currentPageId ) {
+			getPage(currentPageId, callback);
+		} else {
+			callback(null);
+		}
+
+	}
+
+	/**Sets the ID of the current page.
+	 * NOTE: this will not automatically load the page. To change to the specified page, use {@link material.changePage} instead
+	 * @memberof material
+	 * @param pageId {string}	The page ID to set as current*/
+	function setCurrentPageId(pageId) {
+
+		currentPageId = pageId;
+
+	}
+
+	/**Sets a specific page within the current material as the last viewed page
+	 * @memberof material
+	 * @param {string} pageId	The ID of the page to set as the last viewed page*/
+	function setLastPageId(pageId) {
+
+		getPage(pageId, function(page) {
+
+			if ( page ) {
+
+				jQuery.each(loadedPages[getRequestedMaterial()], function(otherPageId, otherPage) {
+					otherPage.lastPage = false;
+				});
+
+				page.lastPage = true;
+				lastPageId = pageId;
+
+			}
+
+		});
+
+	}
+
+	/**Gets the {@link material.Page} object of the last viewed page
+	 * @memberof material
+	 * @param {material.pageCallback} callback	A function to pass the page object*/
+	function getLastPage(callback) {
+
+		if ( lastPageId ) {
+
+			getPage(lastPageId, callback);
+
+		} else {
+
+			console.log("Last page is not available");
+
+		}
+
+	}
+
+	/**Gets a page that has the specified identifier
+	 * @memberof material
+	 * @param {string} identifier				The identifier to search for
+	 * @param {material.pageCallback} callback	A callback to handle the page*/
+	function getPageWithIdentifier(identifier, callback) {
+
+		var loadedPageWithIdentifier = null;
+		var requestedMaterial = getRequestedMaterial();
+
+		jQuery.each(loadedPages[requestedMaterial], function(pageId, page) {
+
+			if ( page.hasOwnProperty("identifier") ) {
+
+				if ( page.identifier == identifier ) {
+					loadedPageWithIdentifier = page;
+				}
+
+			}
+
+		});
+
+		if ( loadedPageWithIdentifier ) {
+
+			callback(loadedPageWithIdentifier);
+
+		} else {
+
+			utils.post("/o/site-material-api/find-pages/" + encodeURIComponent(requestedMaterial), {identifier: identifier}, function(data) {
+
+				if ( data.pageId ) {
+
+					getPage(data.pageId, callback);
+
+				}
+
+			});
+
+		}
+
+	}
+
+	/**Gets a list of all pages with the specified tag
+	 * @memberof material
+	 * @param {string} tag							The tag to search for
+	 * @param {material.pageListCallback} callback	The callback to pass the resultsk*/
+	function getPagesWithTag(tag, callback) {
+
+		getCurrentPage(function(page) {
+
+			var loadedPagesWithTag = [];
+			var currentPageValid = false;
+			var foundLocalPages = false;
+			var requestedMaterial = getRequestedMaterial();
+
+			if ( jQuery.inArray( tag, page.contentTags ) > -1 ) {
+				currentPageValid = true;
+			}
+
+			jQuery.each(loadedPages[requestedMaterial], function(pageId, page) {
+
+				if ( jQuery.inArray( tag, page.contentTags ) > -1 ) {
+					loadedPagesWithTag.push(page);
+					foundLocalPages = true;
+				}
+
+			});
+
+			if ( foundLocalPages ) {
+
+				console.log("Found " + loadedPagesWithTag.length + " pages with tag " + tag + " locally");
+
+				callback(loadedPagesWithTag, currentPageValid);
+
+			} else {
+
+				utils.post("/o/site-material-api/find-pages/" + encodeURIComponent(requestedMaterial), {tag: tag}, function(data) {
+
+					if ( data.pageIds ) {
+
+						var pages = [];
+
+						jQuery.each(data.pageIds, function(index, pageId) {
+							getPage(pageId, function(page) {
+								pages.push(page);
+								if ( pages.length == data.pageIds.length ) {
+									callback(pages, currentPageValid);
+								}
+							});
+						});
+
+					}
+
+				});
+
+			}
+
+		});
+
+	}
+
+	/**Changes the page to a page in the current material that has the specified tag.
+	 * If multiple pages have the tag, the first will be loaded.
+	 * @memberof material
+	 * @param {string} tag								The content tag of the page to change to
+	 * @param {material.PageChangeOptions} [options]	Extra options for the page change operation*/
+	function changePageWithContentTag(tag, options) {
+
+		getPagesWithTag( tag, function(validPages, currentPageValid) {
+
+			if ( validPages.length > 0 && !currentPageValid ) {
+				changePage( validPages[0].id, options );
+			}
+
+		} );
+
+	}
+
+	/**Opens the nearest visible ancestor of the currently open page
+	 * @memberof material*/
+	function upOneLevel() {
+
+		getCurrentPage(function(page) {
+
+			backToPage( getParentPageId(page) );
+
+		});
+
+	}
+
+	/**Opens the specified page or its first visible ancestor if it's hidden
+	 * @memberof material
+	 * @param {string|PageID} pageId		The ID of the page to open
+	 * @param {pageChangeOptions} [options]	Additional page change options*/
+	function backToPage(pageId, options) {
+
+		options = jQuery.extend( { back: true }, options );
+
+		changePage(pageId, options);
+
+	}
+
+	function getParentPageId(page) {
+
+		if ( page.breadcrump.length > 1 ) {
+
+			return page.breadcrump[ page.breadcrump.length - 2 ];
+
+		} else {
+
+			return null;
+
+		}
+
+	}
+
+	/**Gets a {@link Page} that is the parent of the given page.
+	 * @memberof material
+	 * @param {material.Page} page				The page whose parent to get.
+	 * @param {material.pageCallback} callback	A callback to handle the page*/
+	function getParentPage(page, callback) {
+
+		var parentId = getParentPageId(page);
+
+		if ( parentId != null ) {
+			getPage(parentId, callback);
+		}
+
+	}
+
+
+
+
+	/**Get information about current material.
+	 * @memberof material
+	 * @param {materialCallback} callback 	A callback to handle the material.
+	 */
+	function getCurrentMaterial(callback) {
+		if ( self.Cloubi && Cloubi.currentMaterial ) {
+			callback(Cloubi.currentMaterial);
+		}
+	}
+
+	/**Replaces the current browser history URL
+	 * @memberof material
+	 * @param {Object} stateObj	The object to associate with the current history state
+	 * @param {string} url		The replacement URL*/
+	function replaceCurrentHistoryUrl(stateObj, url) {
+		//history.replaceState({pageId: page.id}, "", page.url);
+		history.replaceState(stateObj, "", url + window.location.hash);
+	}
+
+	/**Loads an extra page
+	 * @memberof material
+	 * @param {material.ExtraPage} extraPage		The extra page object
+	 * @param {material.PageChangeOptions} options	Extra options for the page change
+	 * @parma {material.extraPageCallback} callback	A callback that is invoked after the page changes*/
+	function changeToExtraPage(extraPage, options, callback) {
+
+		options = jQuery.extend( { addPageToHistory: true }, options );
+
+
+		var previousPageUrl = self.location.href;
+
+		getCurrentPage(function(page) {
+
+
+			if (page) {
+
+				extraPage.pageUrl = utils.addUrlParameter(extraPage.pageUrl, 'pageid', page.id);
+			} else {
+
+				extraPage.pageUrl = utils.addUrlParameter(extraPage.pageUrl, 'previousurl', previousPageUrl);
+			}
+
+
+
+			if (options.addPageToHistory) {
+
+				history.pushState( {extraPage: extraPage}, "", extraPage.pageUrl );
+			}
+
+			// We are opening page with AJAX, call loading listeners
+
+			var promises = [];
+
+			jQuery.each( pageStartsLoadingListeners, function(index, func) {
+				promises.push( func(extraPage, options) );
+			} );
+
+			pageStartsLoadingListeners = pageStartsLoadingListeners.filter(function(func){return !func._removeOnPageChange});
+			pageUpdatedListeners = pageUpdatedListeners.filter(function(func){return !func._removeOnPageChange});
+			fontSizeListeners = fontSizeListeners.filter(function(func){return !func._removeOnPageChange});
+
+			// Wait for all onPageStartsLoading promises to resolve.
+			jQuery.when.apply(null, promises).done(function() {
+
+				currentPageId = null;
+
+				jQuery("#content").empty().load(extraPage.pageContentUrl, function() {
+
+					jQuery.each(extraPageChangeListeners, function(index, func) {
+						func(extraPage, null);
+					});
+
+					extraPageChangeListeners = extraPageChangeListeners.filter(function(func){return !func._removeOnPageChange});
+					pageChangeListeners = pageChangeListeners.filter(function(func){return !func._removeOnPageChange});
+
+					if (callback) callback(extraPage);
+
+				});
+			});
+		});
+
+	}
+
+	/**Checks if the currently visible page is an extra page
+	 * @memberof material
+	 * @return {boolean}	True if an extra page is visible*/
+	function isExtraPageVisible() {
+		return utils.hasUrlPathPart('extra-page') || utils.hasUrlPathPart('my-page');
+	}
+
+	function invokePageChangeListeners(page, options, data){
+		jQuery.each(pageChangeListeners, function(index, func) {
+			func(page, options, data);
+		});
+
+		extraPageChangeListeners = extraPageChangeListeners.filter(function(func){return !func._removeOnPageChange});
+		pageChangeListeners = pageChangeListeners.filter(function(func){return !func._removeOnPageChange});
+	}
+
+	/**Changes the currently open material page, loading the data from the server if necessary
+	 * @memberof material
+	 * @param {string|material.PageID} pageId				The ID of the page to change to
+	 * @param {material.PageChangeOptions} [options]		Contains extra options for the page change operation*/
+	function changePage(pageId, options) {
+
+		options = jQuery.extend( { addPageToHistory: true, ignorePageMappers: false, loadContent: true, back: false }, options );
+
+		var mapperFunc = pageMappers[pageId];
+
+		if ( !options.ignorePageMappers && jQuery.isFunction(mapperFunc) ) {
+
+			// A mapper function exists for this pageId. Just delegate everything to it.
+			mapperFunc(pageId);
+
+		} else {
+
+			getPage(pageId, function(page) {
+
+				if ( page.hideFromNavigation ) {
+
+					// This page is hidden from navigation, so we cannot change directly to it.
+					// Instead, we change either to the parent page or first child page, depending
+					// on whether we are moving "up" or "down" in the navigation hierarchy.
+
+					var optionsWithoutBack = jQuery.extend( {}, options, { back: false } );
+
+					if ( options.back ) {
+
+						// We are moving up in navigation hierarchy, open parent page instead.
+						changePage( getParentPageId(page), options );
+
+					} else {
+						// We are moving down in navigation hierarchy, open first child page instead.
+						getPageChildPages(page.id, {}, function(pages){
+							pages = pages.filter(function(page){
+								return !page.inactive && page.lockState !== 'LOCKED' && page.lockState !== 'SHOW_IN_NAVIGATION_ONLY';
+							});
+							
+							if ( pages.length > 0 ) {
+								changePage( pages[0].id, optionsWithoutBack );
+							}
+						})
+
+						
+
+					}
+
+				} else {
+
+					if ( ajaxLoadEnabled && sameMaterial(pageId) ) {
+
+						// We are opening page with AJAX from current material.
+						// This is the default case.
+
+						var promises = [];
+
+						jQuery.each( pageStartsLoadingListeners, function(index, func) {
+							promises.push( func(page, options) );
+						} );
+						pageStartsLoadingListeners = pageStartsLoadingListeners.filter(function(func){return !func._removeOnPageChange});
+						pageUpdatedListeners = pageUpdatedListeners.filter(function(func){return !func._removeOnPageChange});
+						fontSizeListeners = fontSizeListeners.filter(function(func){return !func._removeOnPageChange});
+
+						// Wait for all onPageStartsLoading promises to resolve.
+						jQuery.when.apply(null, promises).done(function() {
+
+							if ( options.addPageToHistory ) {
+								history.pushState( {pageId: page.id}, "", page.url );
+							}
+
+							//Get any data parameter from pageId and forward it to listeners
+							var data = {};
+							if (typeof(pageId) === "object" && pageId.data){
+								data = pageId.data;
+							}
+
+							if ( options.loadContent ) {
+
+								var renderer = pageContentTypeRenderers[page.contentType ? page.contentType : 'navigation/menu'];
+
+								if ( renderer ) {
+
+									// We have a custom renderer for this type of page, no
+									// need to load it from the server. Just call the renderer.
+									jQuery("#content").empty();
+									setTimeout(function() {
+										renderer(page, "content", function() {
+											invokePageChangeListeners(page, options, data);
+										});
+									}, 1);
+
+								} else {
+
+									// Load up-to-date version of the new page from server and then
+									// call any listeners.
+
+									// Adding cache bust to URL to prevent iOS to fetch the content from cache.
+									var url = page.contentUrl;
+									url.indexOf("?") == -1 ? url += "?" : url += "&";
+									url += "c=" + ((new Date()).getTime());
+
+									jQuery("#content").empty().load(url, function() {
+										invokePageChangeListeners(page, options, data);
+									});
+
+								}
+
+								// Toggle language attribute in the elements with "content" id
+								if (page.language) {
+									jQuery("#content").attr({lang: page.language});
+								}
+								else {
+									jQuery("#content").removeAttr("lang");
+								}
+
+
+							} else {
+
+								// Skip loading the actual page content. Just leave current page content
+								// as it is and call listeners that we have "changed" the page.
+
+								invokePageChangeListeners(page, options, data);
+
+							}
+
+							setCurrentPageId(typeof(pageId) === 'object' ? pageId.pageId : pageId);
+
+						});
+
+					} else {
+
+						// Either we are not using AJAX (we should!) or the target page
+						// is not from current material. Anyway, we must do full page load.
+
+						//Still invoke listeners to make sure everything is saved
+						var promises = [];
+						jQuery.each( pageStartsLoadingListeners, function(index, func) {
+							promises.push( func(page, options) );
+						} );
+
+						jQuery.when.apply(null, promises).done(function() {
+
+							var url = page.url; 	// This is the full URL of the page.
+
+							if ( typeof(pageId) === 'object' && pageId.urlParams ) {
+								// Page has some URL parameters. Append them to the URL.
+								jQuery.each(pageId.urlParams, function(key, value) {
+									url = utils.addUrlParameter(url, key, value);
+								})
+							}
+
+							self.location = url;
+
+						});
+					}
+
+				}
+
+			});
+
+		}
+
+		/**Checks if the page to open is in the same material as the one currently open
+		 * @param {String|material.PageId} page	The ID of the page to open
+		 * @return {Boolean}	true if the page is in the same material as the currently open page*/
+		function sameMaterial(pageId){
+			//If the ID is not an object, assume that it is a string ID in the current material
+			if (typeof(pageId) !== 'object'){
+				return true;
+			}
+			//Check if the numeric ID matches, if present
+			if (pageId.numericMaterialId){
+				return pageId.numericMaterialId == getCurrentMaterialId();
+			}
+			//Check if the
+			return pageId.materialId == getRequestedMaterial();
+		}
+
+	}
+
+	/**Registers a listener that is called whenever an extra page is shown
+	 * @memberof material
+	 * @param {material.extraPageCallback} func	The listener function
+	 * @param {Boolean} removeOnPageChange		If true, the listener will automatically be removed after the page is changed.
+	 * 											Set this to true for listeners set by page content*/
+	function onExtraPageChange(func, removeOnPageChange) {
+		func._removeOnPageChange = removeOnPageChange;
+		extraPageChangeListeners.push(func);
+	}
+
+	/**Registers a callback listener to be invoked whenever the currently displayed page changes
+	 * @memberof material
+	 * @param {material.pageChangeListener} func	The callback function to invoke on page change
+	 * @param {Boolean} removeOnPageChange		If true, the listener will automatically be removed after the page is changed.
+	 * 											Set this to true for listeners set by page content*/
+	function onPageChange(func, removeOnPageChange) {
+		func._removeOnPageChange = removeOnPageChange;
+		pageChangeListeners.push(func);
+
+	}
+	
+	/**Removes a callback listener to be invoked when the page changes
+	 * @param {material.pageChangeListener} func	A registered page load callback function*/
+	function offPageChange(func) {
+		var index = pageChangeListeners.indexOf(func);
+		if (index > -1) {
+			pageChangeListeners.splice(index, 1);
+		}
+	}
+
+	/**Registers a callback listener to be invoked when a page change is requested, but before it actually takes place
+	 * @memberof material
+	 * @param {material.beforePageChangeListener} func	The callback function to invoke before page change
+	 * @param {Boolean} removeOnPageChange				If true, the listener will automatically be removed immediately
+	 * 													before the page is changed (after being invoked).
+	 * 													Set this to true for listeners set by page content*/
+	function onPageStartsLoading(func, removeOnPageChange) {
+		func._removeOnPageChange = removeOnPageChange;
+		pageStartsLoadingListeners.push(func);
+
+	}
+
+	/**Removes a callback listener to be invoked when a page change is requested, but before it actually takes place
+	 * @memberof material
+	 * @param {material.beforePageChangeListener} func	A registered page load callback function*/
+	function offPageStartsLoading(func) {
+
+		var index = pageStartsLoadingListeners.indexOf(func);
+		if (index > -1) {
+			pageStartsLoadingListeners.splice(index, 1);
+		}
+
+	}
+
+	/**Registers a mapper function to redirect the user from certain pages to others
+	 * @memberof material
+	 * @param {string} pageId				The ID of the page to redirect from
+	 * @param {material.pageMapper} func	The function to use to determine where to redirect*/
+	function registerPageMapper(pageId, func) {
+
+		pageMappers[pageId] = func;
+
+	}
+
+	/**Registers a callback to listen for changes in page data
+	 * @memberof material
+	 * @param {material.pageUpdateCallback} func	A function that is invoked whenever page data changes
+	 * @param {Boolean} removeOnPageChange			If true, the listener will automatically be removed immediately before the page is changed.
+	 * 												Set this to true for listeners set by page content*/
+	function onPageUpdated(func, removeOnPageChange) {
+		func._removeOnPageChange = removeOnPageChange;
+		pageUpdatedListeners.push(func);
+
+	}
+
+	/**Removes a callback to listen for changes in page data
+	 * @memberof material
+	 * @param {material.pageCallback} func	A registered page update callback function*/
+	function offPageUpdated(func) {
+
+		var index = pageUpdatedListeners.indexOf(func);
+		if (index > -1) {
+			pageUpdatedListeners.splice(index, 1);
+		}
+
+	}
+
+	/**Sets up a playlist change listener
+	 * @memberof material
+	 * @param {material.playlistCallback} func	A function that will be called whenever a playlist is set or removed.
+	 * 											The function parameter is the newly set playlist.
+	 * 											When the playlist is removed, the function will be invoked with null.*/
+	function onPlaylistChange(func) {
+		playlistChangeListeners.push(func);
+	}
+
+	function getWaitingObj(type, waitingObjs) {
+		var waitingObj = waitingObjs[type];
+
+		if (!waitingObj) {
+			waitingObj = {};
+			waitingObjs[type] = waitingObj;
+			waitingObj.promise = new $.Deferred();
+		}
+
+		return waitingObj;
+	}
+
+	function setWaitingObjReady(waitingObj, property, value) {
+		waitingObj[property] = value;
+		waitingObj.promise.resolve();
+	}
+
+	function getWaitingObjProperty(waitingObj, property, callback) {
+
+		waitingObj.promise.then(function() {
+			callback(waitingObj[property]);
+		});
+
+	}
+
+	/**Sets a renderer
+	 * @memberof material
+	 * @param {string} type		The type of the renderer
+	 * @param {any} renderer	The renderer*/
+	function setRenderer(type, renderer) {
+
+		var rendererObj = getWaitingObj(type, renderers);
+		setWaitingObjReady(rendererObj, 'renderer', renderer);
+
+	}
+
+	/**Gets a renderer when it becomes available
+	 * @memberof material
+	 * @param {string} type							The type of renderer to get
+	 * @param {material.anyCallback} getCallback	A callback to receive the renderer*/
+	function getRenderer(type, getCallback) {
+
+		getWaitingObjProperty( getWaitingObj(type, renderers), 'renderer', getCallback );
+
+	}
+
+	/**Sets custom page data
+	 * @memberof material
+	 * @param {string} type		The type of data
+	 * @param {any} renderer	The data*/
+	function setPageCustomData(type, customPageData) {
+
+		var waitingObj = getWaitingObj(type, pageCustomDatas);
+		setWaitingObjReady(waitingObj, 'customPageData', customPageData);
+	}
+
+	/**Sets custom page data when it becomes available
+	 * @memberof material
+	 * @param {string} type							The type of data to get
+	 * @param {material.anyCallback} getCallback	A callback to receive the data*/
+	function getPageCustomData(type, getCallback) {
+
+		getWaitingObjProperty( getWaitingObj(type, pageCustomDatas), 'customPageData', getCallback );
+	}
+
+	/**Adds or removes a bookmark on a page
+	 * @memberof material
+	 * @param {string} pageId	The ID of a page in the current material
+	 * @param {boolean} enabled	true if the bookmark should be set, false if it should be removed*/
+	function setBookmark(pageId, enabled) {
+
+		var requestedMaterial = getRequestedMaterial();
+
+		if ( requestedMaterial ) {
+
+			var data = {};
+
+			data[pageId] = enabled;
+
+			utils.post("/o/site-material-api/set-bookmarks/" + encodeURIComponent(requestedMaterial), data);
+
+			getPage(pageId, function(page) {
+
+				page.bookmarked = enabled;
+
+				triggerPageChanged(page, ["bookmarked"]);
+
+			});
+
+		}
+
+	}
+
+	/**Sets whether the content of material pages can be loaded with AJAX and inserted into the current page or if the browser should
+	 * actually navigate to the content URL
+	 * @memberof material
+	 * @param {boolean} value	If true, new page content will be loaded with AJAX, if false, the browser will load the content as a full web page*/
+	function setAjaxLoadEnabled(value) {
+
+		ajaxLoadEnabled = value;
+
+	}
+
+	/**Gets the achievements for a page
+	 * @memberof material
+	 * @param {material.Page} page	The page data object
+	 * @return {Object}	The achievements for the page, as determined by the current {@link material.AchievementCalculator}*/
+	function getAchievements(page) {
+		return _achievementCalculator(page);
+	}
+
+	/**Sets the achievement calculator
+	 * @memberof material
+	 * @param {material.AchievementCalculator} calculator	The calculator to register*/
+	function registerAchievementCalculator(calculator) {
+		_achievementCalculator = calculator;
+	}
+
+
+	/**Sets a renderer for give page content type. Whenever a page changes and the content type of the
+	 * new page is as given, this renderer function will be called instead of loading page content from the server.
+	 * @memberof material
+	 * @param {string} contentType  The content type to register the renderer with. For example, 'navigation/menu'.
+	 * @param {material.PageContentTypeRenderer} renderer 	The renderer function.
+	 */
+	function registerPageContentTypeRenderer(contentType, renderer) {
+		pageContentTypeRenderers[contentType] = renderer;
+	}
+
+
+	/**Gets the current custom font size
+	 * @memberof material
+	 * @return {int}	The current font size*/
+	function getFontSize() {
+		return fontSize;
+	}
+
+	/**Sets a custom font size and notifies listeners
+	 * @memberof material
+	 * @param {int} size	The size to set*/
+	function setFontSize(size) {
+		fontSize = size;
+		jQuery.each(fontSizeListeners, function(index, func) {
+			func(size);
+		});
+	}
+
+	/**Registers a listener for font size changes
+	 * @memberof material
+	 * @param {material.intCallback} callback	The callback to receive the new font value*/
+	function onFontSizeChange(callback, removeOnPageChange) {
+		callback._removeOnPageChange = removeOnPageChange;
+		fontSizeListeners.push(callback);
+	}
+
+	/**Initializes the material state, sets up event listeners and calls all {@link materialReadyListener}s
+	 * @memberof material
+	 * @param {string} currentPageId	The ID of the initial page
+	 * @param {string} materialId		The ID of the initial material
+	 * @param {int} loadPagesByLevel 	Tells server how many levels down are loaded with root page*/
+	function init(currentPageId, materialId, loadPagesByLevel) {
+		if ( currentPageId ) {
+			setCurrentPageId(currentPageId);
+		}
+
+		if ( materialId ) {
+			currentMaterialId = materialId;
+		}
+
+		window.onpopstate = function(event) {
+
+			if ( event.state ) {
+
+				if ( event.state.pageId ) {
+
+					changePage( event.state.pageId, {
+						addPageToHistory: false,
+						ignorePageMappers: true
+					} );
+				} else if (event.state.extraPage) {
+					changeToExtraPage(event.state.extraPage, {addPageToHistory: false});
+
+				}
+
+			}
+
+		}
+
+		if ( currentMaterialId ) {
+
+			jQuery.each(materialReadyListeners, function(index, func) {
+				func();
+			});
+
+			materialReadyListeners = null;
+
+		} else {
+			if(loadPagesByLevel) {
+				loadPagesWithLevel(loadPagesByLevel, function() {
+
+					jQuery.each(materialReadyListeners, function(index, func) {
+						func();
+					});
+	
+					materialReadyListeners = null;
+	
+				});
+			}
+			else {
+				getCurrentPage(function() {
+
+					jQuery.each(materialReadyListeners, function(index, func) {
+						func();
+					});
+	
+					materialReadyListeners = null;
+	
+				});
+			}	
+		}
+	}
+
+	/**Registers a callback to be invoked when the material becomes availabe
+	 * @memberof material
+	 * @param {Function} callback	A function to invoke when the material is available*/
+	function onMaterialReady(callback) {
+		if ( materialReadyListeners ) {
+			materialReadyListeners.push(callback);
+		} else {
+			callback();
+		}
+	}
+
+	/**Gets the numeric ID of the material containing the current page
+	 * @memberof material
+	 * @return {long}	The ID of the current material*/
+	function getCurrentMaterialId(){
+		return loadedPages[getRequestedMaterial()]._materialId;
+	}
+
+	/**Gets the page ID of the current page
+	 * @memberof material
+	 * @return {string}	The ID of the current page*/
+	function getCurrentPageId(){
+		return currentPageId;
+	}
+
+	/**Gets the content type string of the material containing the current page
+	 * @memberof material
+	 * @return {string}	The content type of the current material*/
+	function getCurrentMaterialContentType(){
+		return loadedPages[getRequestedMaterial()]._contentType;
+	}
+
+	/**Sets a playlist as the currently active playlist
+	 * @memberof material
+	 * @param {?material.Playlist} playlist	An object representing a playlist or null if the current playlist should be removed
+	 * @param {?integer} pageIndex			The number of the initial page to show*/
+	function setCurrentPlaylist(playlist, pageIndex){
+		currentPlaylist = playlist;
+
+		var pageBeforePlaylistChange = {
+			pageId: currentPageId,
+			materialId: getRequestedMaterial()
+		};	
+
+		if (playlist){	
+
+			//Use the playlist as a page source and load the first page
+			currentPageSource = new PlaylistPageSource();
+			if ( typeof(pageIndex) === 'number' ){
+				currentPageSource.setCurrentPageIndex(pageIndex -1);
+			}
+			else {
+				pageIndex = 0;
+			}
+			changeToNextPage();
+		}
+		else {
+			//Switch back to default material page source
+			currentPageSource = new DefaultPageSource();
+					
+		}
+
+		//Inform listeners about playlist change
+		jQuery.each(playlistChangeListeners, function(index, func) {
+			func(playlist, pageBeforePlaylistChange, pageIndex);
+		});
+	}
+
+	/**Gets the currently active playlist
+	 * @memberof material
+	 * @return {?material.Playlist}	An object representing the currently active playlist or null if no playlist is active*/
+	function getCurrentPlaylist(){
+		return currentPlaylist;
+	}
+
+	/**Moves to the next page as determined by the current {@link material.PageSource}
+	 * @memberof material*/
+	function changeToNextPage(){
+		currentPageSource.getNextPageId(function(id){
+			if (id){
+				changePage(id, {});
+			}
+		});
+	}
+
+	/**Moves to the previous page as determined by the current {@link material.PageSource}
+	 * @memberof material*/
+	function changeToPreviousPage(){
+		currentPageSource.getPreviousPageId(function(id){
+			if (id){
+				changePage(id, {});
+			}
+		});
+	}
+
+	/**Sets the current {@link material.PageSource}
+	 * @memberof material
+	 * @param {material.PageSource} source	The page source to set*/
+	function registerPageSource(source){
+		currentPageSource = source;
+	}
+
+	/**Gets the current {@link material.PageSource}, is any.
+	 * @memberof material
+	 * @return {material.PageSource} The page source.*/
+	function getPageSource() {
+		return currentPageSource;
+	}
+
+	/**@deprecated call {@link material.changePage} with a {@link material.PageID} object instead
+	 * @memberof material*/
+	function changeMaterial(requestedMaterial, callback){
+		currentRequestedMaterial = requestedMaterial;
+		callback();
+	}
+
+	/**Gets the permissions that the current user has for the current material
+	 * @memberof material
+	 * @param {material.permissionListCallback} callback	A callback to handle the permissions*/
+	function getCurrentMaterialPermissions(callback){
+		if (materialPermissions){
+			callback(materialPermissions);
+		}
+		else {
+			var requestedMaterial = getRequestedMaterial();
+			if (requestedMaterial){
+				utils.get("/o/site-material-api/permissions/" + encodeURIComponent(requestedMaterial), function(response){
+					if (response.permissions){
+						materialPermissions = response.permissions;
+						callback(materialPermissions);
+					}
+					else {
+						callback([]);
+					}
+				});
+			}
+			else {
+				callback([]);
+			}
+		}
+	}
+
+	/**Tells wheter or not load scores along with the pages. If the theme never uses
+	 * page.scores attribute, then this can be set to true.
+	 * @memberof material
+	 * @param {boolean} skipLoadingScores	True, to not load page scores along with pages.*/
+	function setSkipLoadingScores(skipLoadingScores) {
+		performanceHints.skipLoadingScores = skipLoadingScores;
+	}
+
+	/** If Analytics Framework isn't installed on the server, the server can be configured
+	 * to either use the pages-with-scores endpoint or not load scores at all in material.json.
+	 * Returns true to use the pages-with-scores endpoint, false to not load scores.
+	 * @memberof material 
+	 * @return {boolean} */
+	function loadPageScores() {
+		return Cloubi.pageScoreSettingLoadScores;
+	}
+
+	/** If Analytics Framework is installed on the server, this can be used to not load scores from it.
+	 * True to not use Analytics Framework, false to use it. Configurable on the server.
+	 * @memberof material 
+	 * @return {boolean} */
+	function doNotLoadFromAnalytics() {
+		return Cloubi.doNotLoadScoresFromAnalytics;
+	}
+
+	/** Tells whether or not Analytics Framework is installed by reading a global JS variable
+	 * from the document head, which can be utilized to load PagesScores from 
+	 * the Analytics Framework instead of an endpoint. Also,
+	 * if the user isn't logged into Cloubi, such as with Otava's open demoproducts,
+	 * set isAnalyticsFrameworkInstalled to false to not load scores from the task-status microservice.
+	 * @memberof material 
+	 * @return {boolean}	True, if Analytics Framework is installed on the server. */
+	function isAnalyticsFrameworkInstalled() {
+		if(Cloubi.analyticsFrameworkAvailable && themeDisplay.isSignedIn()) {
+			return Cloubi.analyticsFrameworkAvailable;
+		} else {
+			return false;
+		}
+	}
+	
+	/**Gets metadata of the current material
+	 * @memberof material
+	 * @param {material.metadataCallback} callback	A callback function to handle metadata*/
+	function getMetadataForCurrentMaterial(callback) {
+		if (metadata){
+			callback(metadata);
+		}
+		else {
+			var requestedMaterial = getRequestedMaterial();
+
+			if ( requestedMaterial ) {
+
+				var url = "/o/site-material-api/metadata-for-current-material/" + encodeURIComponent(requestedMaterial);
+
+				utils.get(url, function(response){
+					if (response){
+						metadata = response;
+						callback(metadata);
+					}
+					else {
+						callback({});
+					}
+				});
+			}
+			else {
+				callback({});
+			}
+		}
+	}
+
+	return {
+		init: init,
+		getPage: getPage,
+		getRootPage: getRootPage,
+		getCurrentPage: getCurrentPage,
+		getCurrentMaterialId: getCurrentMaterialId,
+		getCurrentMaterialContentType: getCurrentMaterialContentType,
+		getCurrentPageId: getCurrentPageId,
+		setCurrentPageId: setCurrentPageId,
+		setLastPageId: setLastPageId,
+		changePage: changePage,
+		onPageChange: onPageChange,
+		offPageChange: offPageChange,
+		onPageStartsLoading: onPageStartsLoading,
+		offPageStartsLoading: offPageStartsLoading,
+		setAjaxLoadEnabled: setAjaxLoadEnabled,
+		changePageWithContentTag: changePageWithContentTag,
+		registerPageMapper: registerPageMapper,
+		getPageLevelPages: getPageLevelPages,
+		getPageChildPages: getPageChildPages,
+		onPageUpdated: onPageUpdated,
+		offPageUpdated: offPageUpdated,
+		setBookmark: setBookmark,
+		getRequestedMaterial: getRequestedMaterial,
+		updatePageScore: updatePageScore,
+		markPageVisited: markPageVisited,
+		updatePageScoreFromJSON: updatePageScoreFromJSON,
+		updatePageLockState: updatePageLockState,
+		updatePage: updatePage,
+		backToPage: backToPage,
+		upOneLevel: upOneLevel,
+		setRenderer: setRenderer,
+		getRenderer: getRenderer,
+		setPageCustomData: setPageCustomData,
+		getPageCustomData: getPageCustomData,
+		getLastPage: getLastPage,
+		registerAchievementCalculator: registerAchievementCalculator,
+		getAchievements: getAchievements,
+		getFontSize: getFontSize,
+		setFontSize: setFontSize,
+		onFontSizeChange: onFontSizeChange,
+		getGamificationStatus: getGamificationStatus,
+		onExtraPageChange: onExtraPageChange,
+		changeToExtraPage: changeToExtraPage,
+		isExtraPageVisible: isExtraPageVisible,
+		onMaterialReady: onMaterialReady,
+		replaceCurrentHistoryUrl: replaceCurrentHistoryUrl,
+		triggerPageChanged: triggerPageChanged,
+		getPageWithIdentifier: getPageWithIdentifier,
+		getPagesWithTag: getPagesWithTag,
+		refreshPageScores: refreshPageScores,
+		onPlaylistChange: onPlaylistChange,
+		setCurrentPlaylist: setCurrentPlaylist,
+		getCurrentPlaylist: getCurrentPlaylist,
+		changeToNextPage: changeToNextPage,
+		changeToPreviousPage: changeToPreviousPage,
+		registerPageSource: registerPageSource,
+		getPageSource: getPageSource,
+		changeMaterial: changeMaterial,
+		registerPageContentTypeRenderer: registerPageContentTypeRenderer,
+		getParentPage: getParentPage,
+		getCurrentMaterial: getCurrentMaterial,
+		getCurrentMaterialPermissions: getCurrentMaterialPermissions,
+		setSkipLoadingScores: setSkipLoadingScores,
+		getMaterialISBNs: getMaterialISBNs,
+		getMetadataForCurrentMaterial: getMetadataForCurrentMaterial
+	};
+
+
+
+});
+
+
+
+
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/adaptivity', ['./utils', './material'], function(utils, material) {
+
+	/**
+	 Contains functions for interacting with Cloubi's adaptivity features such as task packages.
+	 <br><br>
+	 These function are intended to be used within materials. If used outside materials, make sure to always manually provide material and page IDs.
+	 <br><br>
+
+	 To use this API, load it like this:
+
+	 <pre><code>
+	require(['fi.cloubi.frontend/adaptivity'], function(adaptivity) {
+		adaptivity.getCurrentTaskPackagePage(function(response) {
+			console.log(response);
+		});
+	});
+	 </code></pre>
+
+	 * @namespace adaptivity */
+
+	/**Represents the current state of a task package
+	 * @memberof adaptivity
+	 * @typedef {object} TaskPackageState
+	 * @property {string} [pageId]			The ID of the page that should be shown to the user
+	 * @property {string} [url]				A URL that can be used to load the contents of the page
+	 * @property {boolean} canSkip			True if the user can skip ahead and load the next page without finishing the current one
+	 * @property {boolean} canReverse		True if the user can go backwards in the task package
+	 * @property {boolean} canReset			True if the user is currently allowed to reset their progress in the task package
+	 * @property {boolean} hasNext			True if there are more pages in the package after the current one
+	 * @property {number} currentSection	The number of the task package section that the user is in
+	 * @property {number} sectionCount		The total number of sections in this package
+	 * @property {string} strategyId 		The selected strategy ID
+	 * @property {number} [currentLevel]	The user's current level
+	 * @property {object} [strategyConfig]	The selected strategy's config*/
+
+
+	/**Represents a keycard that can be used to access locked parts of the material
+	 * @memberof adaptivity
+	 * @typedef {object} Keycard
+	 * @property {number} id			The ID of the keycard
+	 * @property {string} name			The name of the keycard
+	 * @property {string} description	The description of the keycard
+	 * @property {string} imageUrl		An URL that can be used to show an image representing this keycard
+	 * @property {boolean} owned		true if the current user has this keycard, false otherwise*/
+
+	/**A server response object
+	 * @memberof adaptivity
+	 * @mixin
+	 * @typedef {Object} Response
+	 * @property {boolean} success		True if the request was successful
+	 * @property {string[]} [errors]	An array of errors that were encountered while processing the request*/
+
+	/**A generic callback that receives information about an operation's success or failure
+	 * @memberof adaptivity
+	 * @callback GenericCallback
+	 * @param {adaptivity.Response} response	The server response*/
+
+	/**A callback that receives information about a task package's state
+	 * @memberof adaptivity
+	 * @callback TaskStateCallback
+	 * @param {adaptivity.Response} response					The server response
+	 * @param {adaptivity.TaskPackageState} [response.state]	The current task package state*/
+
+	/**A callback that receives information about the user's keycards
+	 * @memberof adaptivity
+	 * @callback KeycardsCallback
+	 * @param {adaptivity.Response} response				The server response
+	 * @param {adaptivity.Keycard[]} [response.keycards]	An array of keycards*/
+
+	/**A callback that receives information about the user's keycards as well as a list of pages affected by those keycards
+	 * @memberof adaptivity
+	 * @callback PendingKeycardsCallback
+	 * @param {adaptivity.Response} response							The server response
+	 * @param {adaptivity.Keycard[]} [response.keycards]				An array of keycards
+	 * @param {Object.<number, material.LockAndReason>} affectedPages	An object mapping IDs of affected pages to their current lock states*/
+
+	/**Material ID request parameter*/
+	var PARAM_MATERIAL = "materialId";
+	/**Page ID request parameter*/
+	var PARAM_PAGE = "pageId";
+
+	var PARAM_KEYCARDS = "keycards";
+
+	var PARAM_AFFECTED_PAGES = "affectedPages";
+	var PARAM_LOCK_STATE = "lockState";
+	var PARAM_LOCK_REASONS = "lockReasons";
+
+	/**Task package servlet endpoint*/
+	var TASK_PACKAGE_ENDPOINT = "/o/adaptive-task-package/";
+
+	var KEYCARDS_ENDPOINT = "/o/adaptivity-keycards/"
+
+	/**ID of currently active task package page*/
+	var currentTaskPage = null;
+	/**Page ID of last active task package*/
+	var activePackage = null;
+	/**Callbacks for finished tasks*/
+	var taskDoneListeners = [];
+	/**Callbacks for next task package page request*/
+	var requestChangeToNextTaskPackagePageListeners = [];
+	/**Callbacks for previous task package page request*/
+	var requestChangeToPreviousTaskPackagePageListeners = [];
+
+	material.onPageChange(function(page){
+		if (page.id !== activePackage){
+			//Reset visible task
+			currentTaskPage = null;
+			//remove any single-page callbacks
+			taskDoneListeners = taskDoneListeners.filter(function(listener){
+				return !listener.cleanOnPageChange;
+			});
+			requestChangeToNextTaskPackagePageListeners = requestChangeToNextTaskPackagePageListeners.filter(function(listener){
+				return !listener.cleanOnPageChange;
+			});
+			requestChangeToPreviousTaskPackagePageListeners = requestChangeToPreviousTaskPackagePageListeners.filter(function(listener){
+				return !listener.cleanOnPageChange;
+			});
+		}
+	});
+	//Listen to score updates
+	material.onPageUpdated(function(page){
+		//Don't do anything unless a task package page is currently visible
+		if (currentTaskPage){
+			//If the page is done, invoke listeners
+			if (currentTaskPage === page.id && (page.scores.progress === 1 || page.scores.scoreMax === 0)){
+				$.each(taskDoneListeners, function(index, listener){
+					listener(page);
+				});
+			}
+			//If the page is the package page, get up-to-date scores for the currently visible task
+			else if (page.id === material.getCurrentPageId()){
+				material.getPage(currentTaskPage, function(taskPage){
+					material.refreshPageScores(taskPage);
+				});
+			}
+		}
+	});
+
+	/**Registers a callback to be invoked whenever the user finishes a task package page or this API is used to load a task package page
+	 * that contains no unfinished tasks.
+	 * @memberof adaptivity
+	 * @param {material.pageCallback} callback	The callback to invoke. Receives the page object of the finished task package page.
+	 * @param {boolean} [cleanOnPageChange]		If true, the callback will be unregistered when the user navigates to a different material page*/
+	function onTaskPackageTaskFinished(callback, cleanOnPageChange){
+		callback.cleanOnPageChange = cleanOnPageChange;
+		taskDoneListeners.push(callback);
+	}
+
+	/**Gets the page ID of the last task package page loaded through this API
+	 * @memberof adaptivity
+	 * @return {?string} The currently active task package page or null if no task package page has been loaded on the current material page*/
+	function getCurrentTaskPackagePageId(){
+		return currentTaskPage;
+	}
+
+	/**Loads the next page from the task package.
+	 * Causes the error "invalid-page" if the specified page is not an adaptive task package page.
+	 * @memberof adaptivity
+	 * @param {adaptivity.TaskStateCallback} callback	A callback to receive the task package state after moving to the next page
+	 * @param {string} [requestedMaterial]				The requested material ID of the material containing the page (default: current material)
+	 * @param {string} [pageId]							The page ID of the task package page (default: current page ID)*/
+	function getNextTaskPackagePage(callback, requestedMaterial, pageId){
+		taskPackageAction("getNext", callback, requestedMaterial, pageId);
+	}
+
+	/**Loads the current page from the task package.
+	 * Causes the error "invalid-page" if the specified page is not an adaptive task package page.
+	 * @memberof adaptivity
+	 * @param {adaptivity.TaskStateCallback} callback	A callback to receive the task package state
+	 * @param {string} [requestedMaterial]				The requested material ID of the material containing the page (default: current material)
+	 * @param {string} [pageId]							The page ID of the task package page (default: current page ID)*/
+	function getCurrentTaskPackagePage(callback, requestedMaterial, pageId){
+		taskPackageAction("getCurrent", callback, requestedMaterial, pageId);
+	}
+	/**Loads the previous page from the task package.
+	 * Causes the error "invalid-page" if the specified page is not an adaptive task package page.
+	 * @memberof adaptivity
+	 * @param {adaptivity.TaskStateCallback} callback	A callback to receive the task package state
+	 * @param {string} [requestedMaterial]				The requested material ID of the material containing the page (default: current material)
+	 * @param {string} [pageId]							The page ID of the task package page (default: current page ID)*/
+	function getPreviousTaskPackagePage(callback, requestedMaterial, pageId){
+		taskPackageAction("getPrevious", callback, requestedMaterial, pageId);
+	}
+	/**Resets the user's progress in a task package.
+	 * Causes the error "invalid-page" if the specified page is not an adaptive task package page.
+	 * @memberof adaptivity
+	 * @param {adaptivity.GenericCallback} callback		A callback to invoke after the package has been reset
+	 * @param {string} [requestedMaterial]				The requested material ID of the material containing the page (default: current material)
+	 * @param {string} [pageId]							The page ID of the task package page (default: current page ID)*/
+	function resetTaskPackage(callback, requestedMaterial, pageId){
+		taskPackageAction("reset", function(response){
+			pageId = pageId || material.getCurrentPageId();
+			material.getPage(pageId, function(page){
+				function refreshChildrenRecursively(parentPage) {
+					parentPage.childPages.forEach(function(childPageId) {
+						material.getPage(childPageId, function(childPage) { 
+							material.refreshPageScores(childPage);
+							refreshChildrenRecursively(childPage);
+						});
+
+					});
+				}
+				refreshChildrenRecursively(page);
+			});
+			if (callback) {
+				callback(response);
+			}
+		}, requestedMaterial, pageId);
+	}
+
+	/**Sends a request to the task package JSON API
+	 * @param {string} action							The action name to append to the base servlet URL
+	 * @param {adaptivity.TaskStateCallback} callback	A callback to handle the response
+	 * @param {string} [requestedMaterial]				The requested material ID of the material containing the page (default: current material)
+	 * @param {string} [pageId]							The page ID of the task package page (default: current page ID)*/
+	function taskPackageAction(action, callback, requestedMaterial, pageId){
+		var params = {}
+		params[PARAM_MATERIAL] = requestedMaterial || material.getRequestedMaterial();
+		params[PARAM_PAGE] = pageId || material.getCurrentPageId();
+		activePackage = params[PARAM_PAGE];
+
+		//Send request
+		utils.post(TASK_PACKAGE_ENDPOINT + action, params, function(response){
+			//If the response has a package state, set the response page as the current task package page
+			if (response.state && response.state.pageId){
+				currentTaskPage = response.state.pageId;
+				callback(response);
+			}
+			else {
+				callback(response);
+			}
+			//Refresh package page scores to update task package progress
+			material.getPage(params[PARAM_PAGE], function(page){
+				material.refreshPageScores(page);
+			});
+		});
+	}
+
+	/**Gets a list of all keycards in a material
+	 * @memberof adaptivity
+	 * @param {adaptivity.KeycardsCallback} [callback]	A callback to receive the keycards
+	 * @param {number} [materialId=current material ID]	The ID of the material whose keycards should be retrieved*/
+	function getAllKeycards(callback, materialId){
+		keycardsAction('allKeycards', callback, materialId);
+	}
+
+	/**Gets a list of all keycards that the user has in a material
+	 * @memberof adaptivity
+	 * @param {adaptivity.KeycardsCallback} [callback]	A callback to receive the keycards
+	 * @param {number} [materialId=current material ID]	The ID of the material whose keycards should be retrieved*/
+	function getOwnedKeycards(callback, materialId){
+		keycardsAction('ownedKeycards', callback, materialId);
+	}
+
+	/**Gets a list of all keycards in a material that have not yet been presented to the user
+	 * @memberof adaptivity
+	 * @param {adaptivity.PendingKeycardsCallback} callback	A callback to receive the keycards
+	 * @param {object} [options]							An object containing extra options
+	 * @param {boolean} [options.autoUpdatePageState=true]	If true, this function will automatically update page state to reflect any changes to lock status
+	 * @param {boolean} [options.autoNotify=true]			If true, this function will automatically call markKeycards for all received keycards
+	 * @param {number} [materialId=current material ID]		The ID of the material whose keycards should be retrieved*/
+	function getPendingKeycards(callback, options, materialId){
+		options = $.extend({
+			autoUpdatePageState: true,
+			autoNotify: true
+		}, options);
+		keycardsAction('pendingKeycards', function(response){
+			if (response.success){
+				if (options.autoUpdatePageState && response[PARAM_AFFECTED_PAGES]) {
+					$.each(response[PARAM_AFFECTED_PAGES], function(id, state) {
+						material.updatePageLockState(id, state[PARAM_LOCK_STATE], state[PARAM_LOCK_REASONS]);
+					});
+				}
+				if (options.autoNotify && response[PARAM_KEYCARDS] && response[PARAM_KEYCARDS].length > 0) {
+					markKeycards( response[PARAM_KEYCARDS].map(function (kc){
+						return kc.id;
+					}) );
+				}
+			}
+			if (callback) {
+				callback(response);
+			}
+		}, materialId);
+	}
+
+	/**Sends a request to the keycards API
+	 * @param {string} action								The action URL parameter of the request
+	 * @param {function} [callback]							A callback to handle the response
+	 * @param {number} [materialId=current material ID]		The ID of the material*/
+	function keycardsAction(action, callback, materialId){
+		var params = {}
+		params[PARAM_MATERIAL] = materialId || material.getCurrentMaterialId();
+
+		utils.post(KEYCARDS_ENDPOINT + action, params, function(response){
+			if (callback) {
+				callback(response);
+			}
+		});
+	}
+
+	/**Marks keycards as notified. Notified keycards will not be fetched with getPendingKeycards.
+	 * @memberof adaptivity
+	 * @param {number[]} ids							The IDs of the keycards to mark as notified
+	 * @param {adaptivity.GenericCallback} callback		A callback to invoke after the keycards have been marked*/
+	function markKeycards(ids, callback){
+		var params = {}
+		params[PARAM_KEYCARDS] = ids;
+
+		utils.post(KEYCARDS_ENDPOINT + "markKeycards", params, function(response){
+			if (callback) {
+				callback(response);
+			}
+		});
+	}
+
+	/**Registers a callback to be invoked whenever some component calls requestChangeToNextTaskPackagePage method
+	 * @memberof adaptivity
+	 * @param {function} callback	The callback to invoke.
+	 * @param {boolean} [cleanOnPageChange]		If true, the callback will be unregistered when the user navigates to a different material page*/
+	function onRequestChangeToNextTaskPackagePage(callback, cleanOnPageChange){
+		callback.cleanOnPageChange = cleanOnPageChange;
+		requestChangeToNextTaskPackagePageListeners.push(callback);
+	}
+
+	/**Registers a callback to be invoked whenever some component calls requestChangeToPreviousTaskPackagePage method
+	 * @memberof adaptivity
+	 * @param {function} callback	The callback to invoke.
+	 * @param {boolean} [cleanOnPageChange]		If true, the callback will be unregistered when the user navigates to a different material page*/
+	function onRequestChangeToPreviousTaskPackagePage(callback, cleanOnPageChange){
+		callback.cleanOnPageChange = cleanOnPageChange;
+		requestChangeToPreviousTaskPackagePageListeners.push(callback);
+	}
+
+	/**Components outside of adaptive tasks package's user interface can request moving to next page.
+	 * It's up to user interface implementation if it wants to support this by registering listener with onRequestChangeToNextTaskPackagePage
+	 * @memberof adaptivity
+	 */
+	function requestChangeToNextTaskPackagePage() {
+		$.each(requestChangeToNextTaskPackagePageListeners, function(index, listener){
+			listener();
+		});
+	}
+
+	/**Components outside of adaptive tasks packages user interface can request moving to previous page.
+	 * It's up to user interface implementation if it wants to support this by registering listener with onRequestChangeToPreviousTaskPackagePage
+	 * @memberof adaptivity
+	 */
+	function requestChangeToPreviousTaskPackagePage() {
+		$.each(requestChangeToPreviousTaskPackagePageListeners, function(index, listener){
+			listener();
+		});
+	}
+
+	return {
+		onTaskPackageTaskFinished: onTaskPackageTaskFinished,
+		getNextTaskPackagePage: getNextTaskPackagePage,
+		getCurrentTaskPackagePage: getCurrentTaskPackagePage,
+		getPreviousTaskPackagePage: getPreviousTaskPackagePage,
+		resetTaskPackage: resetTaskPackage,
+		getCurrentTaskPackagePageId: getCurrentTaskPackagePageId,
+		onRequestChangeToNextTaskPackagePage: onRequestChangeToNextTaskPackagePage,
+		onRequestChangeToPreviousTaskPackagePage: onRequestChangeToPreviousTaskPackagePage,
+		requestChangeToNextTaskPackagePage: requestChangeToNextTaskPackagePage,
+		requestChangeToPreviousTaskPackagePage: requestChangeToPreviousTaskPackagePage,
+		getAllKeycards: getAllKeycards,
+		getOwnedKeycards: getOwnedKeycards,
+		getPendingKeycards: getPendingKeycards,
+		markKeycards: markKeycards
+	}
+});
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/search', ['./utils', './material'], function(utils, material) {
+	
+	/**Contains functions for searching materials and notes. To use this API, load it like this:
+	 
+	 <pre><code>
+	require(['fi.cloubi.frontend/search'], function(search) {
+		search.searchMaterial(function(response) {
+			console.log(response);
+		});
+	});
+	 </code></pre>
+	 
+	 * @namespace search */
+	
+	/**Represents a single search result
+	 * @memberof search
+	 * @typedef {object} Result
+	 * @property {string} material						The ID of the material containing the result, in requested material format
+	 * @property {string} page							The ID of the material page containing the result
+	 * @property {string} [relatedContent]				The ID of the related content file containing the result
+	 * @property {object} highlights					An array containing the matching fields with the matching terms highlighted 
+	 * 													with <code>&lt;span class="term"&gt;match&lt;/span&gt;</code>
+	 * @property {string} highlights.title				An HTML fragment containing the title with highlights
+	 * @property {string} highlights.contents			An HTML fragment containing the contents with highlights
+	 * @property {string} highlights.description		An HTML fragment containing the description with highlights
+	 * @property {string} highlights.notes				An HTML fragment containing a note with highlights
+	 * @property {string} [time]						A human-readable timestamp to display with the result
+	 * @property {object} tags							An object mapping page tags to booleans indicating whether the tag matches the query or not
+	 * @property {search.BreadcrumbItem[]} breadcrumb	The breadcrumb of this page
+	 * @property {boolean} bookmarked					True if this page is bookmarked, false otherwise
+	 * @property {string} materialTitle					The title of the material containing this page
+	 * @property {string} url							An URL that can be used to open this page*/
+	
+	/**Represents an item in a page breadcrumb
+	 * @memberof search
+	 * @typedef {object} BreadcrumbItem
+	 * @property {string} page	The page ID of this breadcrumb item
+	 * @property {string} title	The title of this breadcrumb item*/
+	
+	/**Represents errors that can occur while using this API
+	 * Possible values:
+	 * <ul>
+	 * <li><b>empty-query</b>: No search terms provided</li>
+	 * <li><b>invalid-material</b>: The material specified does not exist or is inaccessible</li>
+	 * </ul>
+	 * @memberof search
+	 * @typedef {string} Error*/
+	
+	/**Represents different fields that can be searched
+	 * Possible values:
+	 * <ul>
+	 * <li><b>title</b>: Page title</li>
+	 * <li><b>contents</b>: Page content</li>
+	 * <li><b>description</b>: Page description</li>
+	 * <li><b>notes</b>: The user's notes on the page</li>
+	 * <li><b>tags</b>: Page tags</li>
+	 * </ul>
+	 * @memberof search
+	 * @typedef {string} Filter*/
+	
+	/**A callback for search results
+	 * @memberof search
+	 * @callback ResultsCallback
+	 * @param {object} response						The server response object
+	 * @param {search.Result[]} [response.results]	The search results
+	 * @param {search.Error[]} response.errors		Contains any errors encountered during the search*/
+	
+	/**A callback for an array of filters
+	 * @memberof search
+	 * @callback FiltersCallback
+	 * @param {search.Filter[]} filters		The filter list*/
+	
+	/**Server endpoint base URL*/
+	var ENDPOINT = "/o/search/";
+	
+	/**Material ID parameter name*/
+	var PARAM_MATERIAL = "material";
+	/**Search query parameter name*/
+	var PARAM_QUERY = "query";
+	/**Filter array parameter name*/
+	var PARAM_FILTERS = "filters";
+	
+	/**Currently enabled filters*/
+	var enabledFilters = null;
+	
+	/**Searches a material
+	 * @memberof search
+	 * @param {string} query							The search query
+	 * @param {search.ResultsCallback} [callback]		The callback for the results
+	 * @param {search.Filter[]} [filters]				A list of filters determining which fields to search. 
+	 * 													If empty or null, all enabled fields will be searched.
+	 * @param {number} [materialId=Current material ID]	The ID of the material to search in*/
+	function searchMaterial(query, callback, filters, materialId){
+		materialId = materialId || material.getCurrentMaterialId();
+		var data = {}
+		data[PARAM_QUERY] = query;
+		data[PARAM_FILTERS] = filters;
+		data[PARAM_MATERIAL] = materialId;
+		utils.post(ENDPOINT + "search-material", data, callback);
+	}
+	
+	/**Searches all materials
+	 * @memberof search
+	 * @param {string} query							The search query
+	 * @param {search.ResultsCallback} [callback]		The callback for the results
+	 * @param {search.Filter[]} [filters]				A list of filters determining which fields to search. 
+	 * 													If empty or null, all enabled fields will be searched.*/
+	function searchAll(query, callback, filters){
+		var data = {}
+		data[PARAM_QUERY] = query;
+		data[PARAM_FILTERS] = filters;
+		utils.post(ENDPOINT + "search-all", data, callback);
+	}
+	
+	/**Reindexes a material. This is intended to be used by editors who need to manually update the search index to reflect the current
+	 * state of the material and therefore works only if the user has edit rights to the material.
+	 * @memberof search
+	 * @param {function} [callback]						A callback that is invoked after the reindexing has been requested. 
+	 * 													Receives a single boolean parameter indicating whether the reindexing was started.
+	 * @param {number} [materialId=Current material ID]	The ID of the material to reindex*/
+	function reindex(callback, materialId){
+		materialId = materialId || material.getCurrentMaterialId();
+		var data = {}
+		data[PARAM_MATERIAL] = materialId;
+		utils.post(ENDPOINT + "reindex", data, function(){callback(true)}, function(){callback(false)});
+	}
+	
+	/**Gets the list of currently available search filters
+	 * @memberof search
+	 * @param {search.FiltersCallback} callback	A callback to receive the list of enabled filters*/
+	function getEnabledFilters(callback){
+		if (enabledFilters == null){
+			utils.get(ENDPOINT + "enabled-filters", function(res){
+				enabledFilters = res[PARAM_FILTERS];
+				callback(enabledFilters);
+			});
+		}
+		else {
+			callback(enabledFilters);
+		}
+	}
+	
+	return {
+		searchMaterial: searchMaterial,
+		searchAll: searchAll,
+		reindex: reindex,
+		getEnabledFilters: getEnabledFilters
+	}
+});
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/dialog', ['./utils'], function(utils) {
+
+	var dialogMap = {};
+	var resizeListenerCreated = false;
+
+	function postActionAndPollUntilReady(dialog, actionUrl, pollUrl, data, callback) {
+
+		callback = callback || utils.reload;
+
+		loading(dialog);
+
+		utils.post(actionUrl, data, function() {
+
+			utils.pollUntilReady(pollUrl, callback, function(progressInformation) {
+
+				loadingStatus(dialog, progressInformation);
+
+			});
+
+		});
+
+	}
+
+	function loading(dialog, keep) {
+
+		dialog = resolveDialog(dialog);
+
+		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
+
+		dialog.dialog.find('.cloubi-modal-dialog-footer input').attr("disabled", "disabled");
+
+		if ( keep ) {
+			dialog.dialog.find('.cloubi-modal-dialog-content').hide();
+			dialog.dialog.find('.cloubi-modal-dialog-content-wrapper').append(loadingAnimation);
+		} else {
+			dialog.dialog.find('.cloubi-modal-dialog-content').empty().append(loadingAnimation);
+		}
+
+	}
+
+	function removeLoading(dialog) {
+
+		dialog = resolveDialog(dialog);
+
+		dialog.dialog.find('.cloubi-modal-dialog-footer input').removeAttr("disabled");
+
+		dialog.dialog.find('.cloubi-modal-dialog-content').show();
+
+		dialog.dialog.find('.cloubi-modal-dialog-loading-animation').remove();
+
+	}
+
+	function loadingStatus(dialog, data) {
+
+		dialog = resolveDialog(dialog);
+
+		var statusText = dialog.dialog.find(".cloubi-modal-dialog-status-text");
+
+		if ( statusText.length == 0 ) {
+
+			statusText = jQuery('<div class="cloubi-modal-dialog-status-text"></div>');
+
+			dialog.dialog.find('.cloubi-modal-dialog-content').append(statusText);
+
+		}
+
+		var text = "";
+
+		if ( data.percent ) {
+			text = data.percent + "% " + Liferay.Language.get('cloubi-dialog-percent-complete');
+		} else {
+			text = Liferay.Language.get('cloubi-dialog-job-is-running');
+		}
+
+		statusText.text(text);
+
+	}
+
+	function clearFooter(dialog) {
+
+		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
+
+		footer.empty();
+
+	}
+
+	function createButton(dialog, callback, text, extraClass, saveDisabled) {
+
+		var button = jQuery('<input type="button" class="btn btn-primary" value="" />');
+
+		if ( extraClass ) {
+			button.addClass(extraClass);
+		}
+
+		button.attr("value", text);
+
+		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
+
+		if ( callback ) {
+			button.click(function() {
+				callback(dialog);
+			});
+		}
+
+		footer.append(button);
+
+		if ( text === Liferay.Language.get('cloubi-dialog-save') && saveDisabled ) {
+			setSaveEnabled(dialog, false);
+		}
+
+	}
+
+	function createButtons(dialog, callback, saveText, cancelText, saveDisabled) {
+
+		clearFooter(dialog);
+
+		createButton(dialog, callback, saveText, "save-button", saveDisabled);
+
+		createButton(dialog, function() {
+			closeDialog(dialog);
+		}, cancelText, "cancel-button");
+
+	}
+
+	function closeDialog(dialog) {
+
+		dialog = resolveDialog(dialog);
+
+		if ( dialog.closeCallback ) {
+			dialog.closeCallback();
+		}
+
+		dialog.curtain.remove();
+
+		dialogMap[dialog.name] = null;
+
+	}
+
+	function resolveDialog(dialog) {
+
+		if ( jQuery.type(dialog) === "string" ) {
+			return dialogMap[dialog];
+		} else {
+			return dialog;
+		}
+
+	}
+
+	function getDialog(name) {
+
+		return dialogMap[name];
+
+	}
+
+	function setDialogHeader(dialog, title) {
+
+		if ( title ) {
+
+			var header = dialog.dialog.find(".cloubi-modal-dialog-header");
+
+			header.text(title);
+
+		}
+
+	}
+
+	function saveOnly(dialog, callback, title, saveDisabled) {
+
+		dialog = resolveDialog(dialog);
+
+		clearFooter(dialog);
+
+		createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-save'), "save-button", saveDisabled);
+
+		setDialogHeader(dialog, title);
+
+	}
+
+	function saveAndCancel(dialog, callback, title, saveDisabled) {
+
+		dialog = resolveDialog(dialog);
+
+		createButtons(dialog, callback,
+				Liferay.Language.get('cloubi-dialog-save'),
+				Liferay.Language.get('cloubi-dialog-cancel'), saveDisabled);
+
+		setDialogHeader(dialog, title);
+
+	}
+
+	function setSaveEnabled(dialog, enabled) {
+
+		dialog = resolveDialog(dialog);
+
+		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
+		var button = footer.find(".save-button");
+
+		button.prop( "disabled", !enabled );
+
+	}
+
+	function yesAndNo(dialog, callback, title) {
+
+		dialog = resolveDialog(dialog);
+
+		createButtons(dialog, callback,
+				Liferay.Language.get('cloubi-dialog-yes'),
+				Liferay.Language.get('cloubi-dialog-no'));
+
+		setDialogHeader(dialog, title);
+
+	}
+
+	function closeOnly(dialog, title, callback) {
+
+		dialog = resolveDialog(dialog);
+
+		clearFooter(dialog);
+
+		if ( callback ) {
+			createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-close'));
+		} else {
+			createButton(dialog, function() {
+				dialog.curtain.remove();
+			}, Liferay.Language.get('cloubi-dialog-close'));
+		}
+
+		setDialogHeader(dialog, title);
+
+	}
+
+	/** Creates a dialog with a save button and a cross button that closes the dialog without saving
+	 * dialog 	A string identifying the dialog
+	 * callback	The callback function that is called when the dialog is saved
+	 * title	The title of the dialog
+	 * Any functions pushed to the dialog's closeListeners array will be executed when the dialog is closed with the cross button*/
+	function saveAndCross(dialog, callback, title) {
+
+		dialog = resolveDialog(dialog);
+
+		clearFooter(dialog);
+
+		createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-save'), 'save-button');
+
+		setDialogHeader(dialog, title);
+
+		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
+
+		cross.click( function() {
+			//Call the close listeners and then close the dialog
+			if (dialog.closeListeners && dialog.closeListeners.forEach){
+				dialog.closeListeners.forEach(function (elem){
+					elem();
+				});
+			}
+			dialog.curtain.remove();
+		});
+
+		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
+
+		header.append(cross);
+
+	}
+	
+	function createCross(dialog, callback){
+		dialog = resolveDialog(dialog);
+		
+		//Create the cross
+		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
+
+		//When the cross is clicked, execute the callback or just close
+		cross.click( function() {
+			if (callback){
+				callback();
+			}
+			else {
+				dialog.curtain.remove();
+			}
+		});
+
+		//Add the cross to header
+		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
+		header.append(cross);
+	}
+
+	/**Configures dialog with a header with a cross in the upper right corner and no footer
+	 * @param dialog	The name of the dialog to configure
+	 * @param title		The dialog title to display in the header
+	 * @param callback	A function to call when the cross is clicked, before the dialog closes*/
+	function crossOnly(dialog, title, callback) {
+
+		//Get dialog object
+		dialog = resolveDialog(dialog);
+
+		//Empty and hide footer
+		clearFooter(dialog);
+		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
+		footer.hide();
+
+		//Set dialog title
+		setDialogHeader(dialog, title);
+
+		//Create the cross
+		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
+
+		//When the cross is clicked, execute the callback and close
+		cross.click( function() {
+			if (callback){
+				callback();
+			}
+			dialog.curtain.remove();
+		});
+
+		//Add the cross to header
+		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
+		header.append(cross);
+
+	}
+
+	function crossOnlyWithOptions(dialog,title,options,callback) {
+		//Get dialog object
+		dialog = resolveDialog(dialog);
+
+		//Empty and hide footer
+		clearFooter(dialog);
+		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
+		footer.hide();
+
+		//Set dialog title
+		setDialogHeader(dialog, title);
+
+		//Create the cross
+		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
+
+		if (options && options.crossText) {
+			var crossText = jQuery('<span class="cloubi-modal-dialog-cross-text"></span>');
+			crossText.text(options.crossText);
+		}
+
+		cross.prepend(crossText);
+
+		//When the cross is clicked, execute the callback and close
+		cross.click( function() {
+			if (callback){
+				callback();
+			}
+			dialog.curtain.remove();
+		});
+
+		//Add the cross to header
+		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
+		header.append(cross);
+	}
+
+	function confirm(message, yesCallback, noCallback) {
+
+		var dialog = create(undefined, 'confirmDialog');
+
+		yesAndNo(dialog, function() {
+			closeDialog(dialog);
+			yesCallback();
+		}, Liferay.Language.get('cloubi-dialog-confirm-dialog-title'));
+
+		dialog.closeCallback = noCallback;
+
+		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
+
+		wrapper.text(message);
+
+		var content = dialog.dialog.find(".cloubi-modal-dialog-content");
+
+		content.append(wrapper);
+
+	}
+
+	function info(message, html, callback) {
+
+		var dialog = create(undefined, 'infoDialog');
+
+		closeOnly(dialog, Liferay.Language.get('cloubi-dialog-info-dialog-title'), callback);
+
+		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
+
+		if ( html ) {
+			wrapper.html(message);
+		} else {
+			wrapper.text(message);
+		}
+
+		var content = dialog.dialog.find(".cloubi-modal-dialog-content");
+
+		content.append(wrapper);
+
+	}
+
+	function resize() {
+
+		var height = jQuery(window).innerHeight() - 200;
+
+		jQuery(".cloubi-modal-dialog-content-wrapper").css("max-height", height + "px");
+
+	}
+
+	function initResize() {
+
+		if ( !resizeListenerCreated ) {
+
+			resizeListenerCreated = true;
+
+			jQuery(window).resize(resize);
+
+		}
+
+		resize();
+
+	}
+
+	function waiting(name) {
+
+		var curtain = jQuery('<div class="cloubi-modal-dialog-curtain cloubi-modal-dialog-old"></div>');
+		var dialog = jQuery('<div class="cloubi-modal-dialog"></div>');
+		var contentWrapper = jQuery('<div class="cloubi-modal-dialog-content-wrapper"></div>');
+		var content = jQuery('<div class="cloubi-modal-dialog-content"></div>');
+		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
+
+		curtain.append(dialog);
+
+		contentWrapper.append(content);
+
+		dialog.append(contentWrapper);
+
+		curtain.appendTo('body');
+
+		loadingAnimation.appendTo(content);
+
+		var dialogData = {
+			dialog: dialog,
+			curtain: curtain,
+			name: name
+		};
+
+		if ( name ) {
+			dialogMap[name] = dialogData;
+		}
+
+		initResize();
+
+		return dialogData;
+
+	}
+
+	/**Creates a new modal dialog
+	 * @param url		The url used to get the contents of the dialog
+	 * @param name		The name used to identify the dialog
+	 * @param optional	(optional)
+	 * @param parent	(optional) A jQuery element to which the dialog is appended.
+	 * 					If not specified, the dialog will be appended to body.*/
+	function create(url, name, optional, parent) {
+		//Create the HTML elements of the dialog
+		var curtain = jQuery('<div class="cloubi-modal-dialog-curtain cloubi-modal-dialog-old"></div>');
+		var dialog = jQuery('<div class="cloubi-modal-dialog"></div>');
+		var header = jQuery('<div class="cloubi-modal-dialog-header"></div>');
+		var contentWrapper = jQuery('<div class="cloubi-modal-dialog-content-wrapper"></div>');
+		var content = jQuery('<div class="cloubi-modal-dialog-content"></div>');
+		var footer = jQuery('<div class="cloubi-modal-dialog-footer"></div>');
+		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
+
+		//Nest the created elements
+		curtain.append(dialog);
+
+		contentWrapper.append(content);
+
+		dialog.append(header).append(contentWrapper).append(footer);
+
+		//If a parent element was supplied, append the dialog to it, otherwise append the dialog to the document body
+		if (parent){
+			curtain.appendTo(parent);
+		}
+		else {
+			curtain.appendTo('body');
+		}
+
+		//Load the content HTML from the supplied url
+		if ( url ) {
+			loadingAnimation.appendTo(content);
+			//Do html POST request if the url parameter looks like an object
+			if ( url.post && url.url && url.data ) {
+				utils.post(url.url, url.data, function(html) {
+					content.html(html);
+				}, undefined, 'html');
+			} else {
+				content.load(url);
+			}
+		}
+
+		var dialogData = {
+			dialog: dialog,
+			curtain: curtain,
+			name: name,
+			url: url,
+			optional: optional
+		};
+
+		//Save the dialog object locally so that it can be referenced from inside the dialog
+		if ( name ) {
+			dialogMap[name] = dialogData;
+		}
+
+		initResize();
+
+		return dialogData;
+
+	}
+
+	function reloadDialog(dialog) {
+
+		dialog = resolveDialog(dialog);
+
+		if ( dialog.url ) {
+
+			clearFooter(dialog);
+
+			var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
+
+			var content = dialog.dialog.find(".cloubi-modal-dialog-content");
+
+			content.empty().append(loadingAnimation).load(dialog.url);
+
+		}
+
+	}
+
+
+	function forceSize(dialog, width, height) {
+
+		dialog = resolveDialog(dialog);
+
+		var container = dialog.dialog;
+		var wrapper = container.find(".cloubi-modal-dialog-content-wrapper");
+
+		wrapper.css("height", height + "px");
+		container.css("width", width + "%");
+
+	}
+
+	/**Maximizes the size of a dialog, making it take up as much size as it needs (up to window size -100 on both axes)
+	 * @param dialog	The name of the dialog*/
+	function maximize(dialog) {
+		dialog = resolveDialog(dialog);
+
+		var container = dialog.dialog;
+		var wrapper = container.find(".cloubi-modal-dialog-content-wrapper");
+
+		//calculate maximum size
+		var height = window.innerHeight - 200;
+		var width = window.innerWidth - 200;
+
+		//maximize the dialog
+		wrapper.css("max-height", height + "px");
+		container.css("max-width", width + "px");
+	}
+
+	function showErrorMessage(elem, text) {
+		var parent = elem.parent();
+		var wrapper = parent.find(".alert.alert-danger");
+
+		if (wrapper.length == 0) {
+			wrapper = jQuery("<div class='alert alert-danger'></div>");
+			parent.prepend(wrapper);
+		}
+
+		wrapper.text(text);
+	}
+
+	function removeErrorMessage(elem) {
+
+		if ( elem != undefined && elem != null ) {
+			elem.parent().find(".alert-danger").remove();
+		}
+
+	}
+
+	function addClass(dialog, className) {
+
+		dialog = resolveDialog(dialog);
+
+		dialog.dialog.addClass(className);
+
+	}
+
+	function addCurtainClass(dialog, className) {
+		
+		dialog = resolveDialog(dialog);
+		
+		dialog.curtain.addClass(className);
+		
+	}
+	
+	function getContentElem(dialog){
+		dialog = resolveDialog(dialog);
+		return dialog.curtain.find(".cloubi-modal-dialog-content");
+	}
+	
+	function showLargeStaticContent(contentType, content, title, desc) {
+
+		var popup = jQuery('<div class="cloubi-large-content-popup"></div>');
+		var close = jQuery('<div class="cloubi-large-content-popup-close">X</div>');
+		var contentElem = jQuery('<div class="cloubi-large-content-popup-content"></div>');
+		var wrapper = jQuery('<div class="cloubi-large-content-wrapper"></div>');
+
+		wrapper.append(close);
+
+		var closeCallback = function() { popup.remove(); jQuery(window).off('.largecontent'); };
+		var ignoreCallback = function(e) { e.stopPropagation(); };
+
+		if ( contentType == 'image' ) {
+
+			if ( title ) {
+				var titleElem = jQuery('<div class="cloubi-large-content-popup-content-title"></div>');
+				titleElem.text(title).appendTo(contentElem);
+				titleElem.click(ignoreCallback);
+			}
+
+			var image = jQuery('<img class="cloubi-large-content-image" />');
+			image.attr("src", content);
+			image.appendTo(wrapper);
+			image.click(ignoreCallback);
+
+			if ( desc ) {
+				var descElem = jQuery('<div class="cloubi-large-content-popup-content-desc"></div>');
+				descElem.text(desc).appendTo(contentElem);
+				descElem.click(ignoreCallback);
+			}
+
+			var adjustSize = function() {
+
+				var margin = 40;
+				if (window.innerWidth < 768) {
+					margin = 10;
+				}
+
+				image.css("max-height", popup.height() - margin);
+				image.css("max-width", popup.width() - margin);
+			}
+
+			setTimeout(adjustSize, 100);
+
+			jQuery(window).on('resize.largecontent', adjustSize);
+
+		} else if ( contentType == 'html' ) {
+
+			contentElem.html(content);
+
+		}
+
+		close.click(closeCallback);
+		popup.click(closeCallback);
+
+		contentElem.append(wrapper);
+		popup.append(contentElem).appendTo("body");
+
+	}
+
+	return {
+		create: create,
+		saveAndCancel: saveAndCancel,
+		saveOnly: saveOnly,
+		yesAndNo: yesAndNo,
+		closeOnly: closeOnly,
+		saveAndCross: saveAndCross,
+		crossOnly: crossOnly,
+		crossOnlyWithOptions: crossOnlyWithOptions,
+		loading: loading,
+		removeLoading: removeLoading,
+		getDialog: getDialog,
+		forceSize: forceSize,
+		maximize: maximize,
+		closeDialog: closeDialog,
+		waiting: waiting,
+		setSaveEnabled: setSaveEnabled,
+		showErrorMessage: showErrorMessage,
+		removeErrorMessage: removeErrorMessage,
+		loadingStatus: loadingStatus,
+		postActionAndPollUntilReady: postActionAndPollUntilReady,
+		confirm: confirm,
+		info: info,
+		reloadDialog: reloadDialog,
+		addClass: addClass,
+		addCurtainClass: addCurtainClass,
+		createButton: createButton,
+		createCross: createCross,
+		setDialogHeader: setDialogHeader,
+		showLargeStaticContent: showLargeStaticContent,
+		getContentElem: getContentElem
+	};
+
+});
+
+
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/translations', ['fi.cloubi.frontend.common.js/rest-client'], function (RestClient) {
+
+  var url = window.location.origin + "/o/rest/v1/";
+  var restClient = new RestClient(url);
+  var locale = null;
+  
+  function translateKeys() {
+    return translateAll(Array.prototype.slice.call(arguments));
+  }
+
+  function translateAll(keyArray) {
+    var data = {
+      locale: locale,
+      keys: Array.isArray(keyArray) ? keyArray : [keyArray]
+    };
+    
+    return restClient.POST("translations", data);
+  }
+
+  function setLocale(l) {
+    locale = l;
+  }
+  
+  function getLocale() {
+    return locale;
+  }
+
+  return {
+    translateKeys: translateKeys,
+    translateAll: translateAll,
+    setLocale: setLocale,
+    getLocale: getLocale
+  };
+
+});
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/utils', ['fi.cloubi.frontend.common.js/translations'], function(translationsJS) {
+
+	/** Offers utility functions for other JavaScript classes
+	 * @namespace utils
+	 */
+	var cssFileCache = null;
+	var extensions = {};
+
+	if (typeof String.prototype.endsWith !== 'function') {
+	    String.prototype.endsWith = function(suffix) {
+	        return this.indexOf(suffix, this.length - suffix.length) !== -1;
+	    };
+	}
+
+	
+
+	var Language = {};
+
+	if ( self.Liferay && self.Liferay.Language && self.Liferay.Language.cloubi ) {
+		
+		Language.get = Liferay.Language.get;
+		
+	} else {
+		
+		var AUI = YUI();
+		
+		Language.get = function(key) {
+			return key;
+		};
+
+		AUI.use(
+			'io-base',
+			function(AUI) {
+				Language.get = AUI.cached(
+					function(key, languageId, extraParams) {
+						var instance = this;
+
+						var url = Liferay.ThemeDisplay.getPathContext() + '/language/' + languageId + '/' + key + '/';
+
+						if (extraParams) {
+							if (typeof extraParams == 'string') {
+								url += extraParams;
+							}
+							else if (Array.isArray(extraParams)) {
+								url += extraParams.join('/');
+							}
+						}
+
+						var headers = {
+							'X-CSRF-Token': Liferay.authToken
+						};
+
+						var value = '';
+
+						AUI.io(
+							url,
+							{
+								headers: headers,
+								method: 'GET',
+								on: {
+									complete: function(i, o) {
+										value = o.responseText;
+									}
+								},
+								sync: true
+							}
+						);
+
+						return value;
+					}
+				);
+			}
+		);
+		
+	}
+	
+	var _draggingOn = false;
+
+	$("body").on("touchstart", function(){
+		_draggingOn = false;
+	});
+
+	$("body").on("touchmove", function(){
+		_draggingOn = true;
+	});
+
+	/**
+	 * Checks if dragging is enable
+	 * @memberof utils
+	 * @return {boolean} True if dragging is enabled
+	 *
+	 */
+	function isDraggingOn() {
+		return _draggingOn;
+	}
+
+	/**
+	 * Sends a get request to the given url
+	 * @memberof utils
+	 * @param url				URL where the request is sent
+	 * @param successCallback	A function that is invoked on request success
+	 * @param failureCallback	A function that is invoked on request failure
+	 */
+	function get(url, successCallback, failureCallback, allowCache) {
+
+		var settings = {
+			url: url,
+			dataType: 'json',
+			type: 'GET',
+			timeout: 5 * 60 * 1000,
+			success: function(responseJSON) {
+				if ( successCallback != null ) {
+					successCallback.call(this, responseJSON);
+				}
+			},
+			error: function() {
+				if ( failureCallback != null ) {
+					failureCallback.call(this);
+				}
+			}
+		}
+
+		if(!allowCache)
+			settings.cache = false;
+
+		jQuery.ajax(settings);
+
+	}
+
+	/**
+	 * Returns html content from given url
+	 * @memberof utils
+	 * @param url				URL where the request is sent
+	 * @param successCallback	A function that is invoked on request success
+	 * @param failureCallback	A function that is invoked on request failure
+	 */
+	function getHtml(url, successCallback, failureCallback, allowCache) {
+		var settings = {
+			url: url,
+			dataType: 'html',
+			type: 'GET',
+			timeout: 5 * 60 * 1000,
+			success: function(html) {
+				if ( successCallback != null ) {
+					successCallback.call(this, html);
+				}
+			},
+			error: function(xhr, error) {
+				if ( failureCallback != null ) {
+					failureCallback.call(this, error);
+				}
+			}
+		};
+
+		if(!allowCache)
+			settings.cache = false;
+
+		jQuery.ajax(settings);
+
+	}
+
+	/**
+	 * Sends a post request to the given url
+	 * @memberof utils
+	 * @param url				URL where the request is sent
+	 * @param data				The data that is sent in the request
+	 * @param successCallback	A function that is called on request success
+	 * @param failureCallback	A function that is called on request failure
+	 * @param responseDataType	Data type of the data that is sent
+	 */
+	function post(url, data, successCallback, failureCallback, responseDataType) {
+
+		if ( !responseDataType ) {
+			responseDataType = 'json';
+		}
+
+		jQuery.ajax({
+			url: url,
+			dataType: responseDataType,
+			contentType: 'application/json; charset=UTF-8',
+			type: 'POST',
+			timeout: 5 * 60 * 1000,
+			data: JSON.stringify(data),
+			headers: {
+				'X-CSRF-Token': Liferay.authToken
+			},
+			success: function(responseData) {
+				if ( successCallback != null ) {
+					successCallback.call(this, responseData);
+				}
+			},
+			error: function(xhr, status) {
+				if ( failureCallback != null ) {
+					failureCallback.call(this, status);
+				}
+			},
+			skipReconnectCheck: failureCallback != null
+		});
+
+	}
+
+	// This version of post also returns request data for cases where the request info is required in resolution
+	function postWithRequestData(url, data, successCallback, failureCallback, responseDataType) {
+
+		if ( !responseDataType ) {
+			responseDataType = 'json';
+		}
+
+		return jQuery.ajax({
+			url: url,
+			dataType: responseDataType,
+			contentType: 'application/json; charset=UTF-8',
+			type: 'POST',
+			timeout: 5 * 60 * 1000,
+			data: JSON.stringify(data),
+			headers: {
+				'X-CSRF-Token': Liferay.authToken
+			},
+			success: function(responseData) {
+				if ( successCallback != null ) {
+					successCallback.call(this, data, responseData);
+				}
+			},
+			error: function(xhr, status) {
+				if ( failureCallback != null ) {
+					failureCallback.call(this, status);
+				}
+			},
+			skipReconnectCheck: failureCallback != null
+		});
+
+	}
+
+	var failingRequests = [];
+	var beforeUnload = function(event) {
+        event.preventDefault();
+        return '';
+    };
+    var spinnerTimeout = null;
+	var loadingSpinner = null;
+	var pendingRequests = 0;
+
+	var translatedLoadingText = Language.get('cloubi-dialog-job-is-running', translationsJS.getLocale());
+	var loadingSpinnerTemplate = '<div id="cloubi-utils-unsaved-data-flash-message"><span class="saving-in-progress"><i class="cloubi-utils-unsaved-data-flash-message-spinner fa-spin"></i><span id="cloubi-utils-unsaved-data-flash-message-text">' + translatedLoadingText + '</span></span></div>';
+
+	function postUntilSuccessful(url, data, successCallback, failureCallback, responseDataType) {
+
+        //Make request object so we can store the parameters and redo the request later
+        var request = {
+            url: url,
+            data: data,
+            successCallback: successCallback,
+            failureCallback: failureCallback,
+            responseDataType: responseDataType
+        }
+        pendingRequests++;
+        if (pendingRequests == 1) {
+            //If this is the first request, setup safety features
+
+            //Show spinner on timeout
+            spinnerTimeout = setTimeout(function() {
+                if (!loadingSpinner) {
+                    loadingSpinner = $(loadingSpinnerTemplate);
+                    $(document.body).append(loadingSpinner);
+                }
+            }, 2000);
+
+            //Register before unload handler
+            $(window).on('beforeunload', beforeUnload);
+        }
+
+        // Success handler
+        var finishRequest = function(originalRequest, responseData) {
+            //Finish the original request
+            originalRequest.successCallback(responseData);
+            pendingRequests--;
+
+            //If there are no more requests, clear safety features
+            if (pendingRequests == 0) {
+                //Clear spinner timeout
+                clearTimeout(spinnerTimeout);
+                //Remove loading spinner if it was already shown
+                if (loadingSpinner) {
+                    loadingSpinner.remove();
+                    loadingSpinner = null;
+                }
+                //Clear before unload function
+                $(window).off('beforeunload', beforeUnload);
+            }
+
+        }
+
+        // Failure handler: retries the request until it completes
+        var retryPost = function(failingRequest, delay) {
+            // Post the request, retry if it fails
+            post(failingRequest.url, failingRequest.data,
+            function(response) {
+                finishRequest(failingRequest, response)
+
+                //If there are more failing requests, play back the next one on the list
+                if (failingRequests.length > 0) {
+                    var next = failingRequests.shift();
+                    retryPost(next, 1);
+                }
+            },
+            function() {
+                // On failure, increase delay and retry after timeout
+                if (delay < 15) {
+                    delay++;
+                }
+                console.log("Post failed, retrying in " + delay + " seconds")
+                setTimeout(function() {retryPost(failingRequest, delay)}, delay * 1000);
+            }, failingRequest.responseDataType)
+        }
+
+        // If no requests have failed, run the request as normal
+	    if (failingRequests.length == 0) {
+	        post(url, data,
+	        function(response) {
+	            finishRequest(request, response)
+	        },
+	        function() {
+	            //If the request fails, push it to the failed request list
+	            failingRequests.push(request)
+
+	            if (failingRequests.length == 1) {
+                    //If this was the first failed request, start the retry loop
+                    retryPost(request, 1);
+	            }
+	        }, responseDataType)
+	    }
+	    else {
+	        //If there are already failing requests, add this to the list so it will be processed when previous ones are done
+	        failingRequests.push(request)
+	    }
+	}
+	
+	/**
+	 * Uploads a file to the given url
+	 * @memberof utils
+	 * @param url				URL where the request is sent
+	 * @param params			The data that is sent in the request
+	 * @param file				The file that is uploaded with the request
+	 * @param successCallback	A function that is called on request success
+	 * @param failureCallback	A function that is called on request failure
+	 * @param filename			The part name of the file (default 'file')
+	 * @param responseDataType	Data type of the data that is sent
+	 */
+	function upload(url, params, file, successCallback, failureCallback, filename, responseDataType) {
+		responseDataType = responseDataType || 'json';
+		filename = filename || "file";
+		
+		var data = new FormData();
+		data.append(filename, file);
+		$.each(params, function(name, value){
+			data.append(name, value);
+		});
+
+		jQuery.ajax({
+			url: url,
+			dataType: responseDataType,
+			contentType: false,
+			enctype: 'multipart/form-data',
+			async: true,
+			type: 'POST',
+			timeout: 5 * 60 * 1000,
+			data: data,
+			processData: false,
+			headers: {
+				'X-CSRF-Token': Liferay.authToken
+			},
+			success: function(responseData) {
+				if ( successCallback != null ) {
+					successCallback.call(this, responseData);
+				}
+			},
+			error: function(xhr, status) {
+				if ( failureCallback != null ) {
+					failureCallback.call(this, status);
+				}
+			},
+			skipReconnectCheck: failureCallback != null
+		});
+	}
+
+	/**
+	 * Reloads the current page
+	 * @memberof utils
+	 */
+	function reload() {
+
+		self.location.reload();
+
+	}
+
+	/**
+	 * Polls URL until it is ready to complete the given callback function
+	 * @memberof utils
+	 * @param url		The URL that is being polled
+	 * @param callback	The callback function that is called when the URL is ready
+	 * @param tick
+	 */
+	function pollUntilReady(url, callback, tick) {
+
+		jQuery.ajax({
+			url: url,
+			dataType: 'json',
+			contentType: 'application/json; charset=UTF-8',
+			type: 'GET',
+			timeout: 5 * 60 * 1000,
+			data: '',
+			success: function(data) {
+				if ( data.hasJob ) {
+					if ( tick ) {
+						tick(data);
+					}
+					setTimeout( function() {
+						pollUntilReady(url, callback, tick);
+					}, 1000 );
+				} else {
+					callback();
+				}
+			},
+			error: function() {
+				callback();
+			},
+			cache: false
+		});
+
+	}
+
+	/** Returns a list of parameters in a function invocation
+	 * @memberof utils
+	 * @param invocation	The invocation
+	 * @return				A list of parameters in the invocation
+	 */
+	function parseFunctionInvocation(invocation) {
+
+		var start = invocation.indexOf("(");
+		var end = invocation.indexOf(")");
+
+		if ( start == -1 ) {
+			return {
+				name: invocation,
+				params: []
+			};
+		} else {
+			var name = invocation.substring(0, start);
+			var paramsStr = null;
+			if ( end == -1 ) {
+				paramsStr = invocation.substring(start+1);
+			} else {
+				paramsStr = invocation.substring(start+1, end);
+			}
+			var params = paramsStr.split(",");
+			return {
+				name: name,
+				params: params
+			};
+		}
+
+	}
+
+	/** This function seeks the specified DOM element and all it's child elements to see if they have a data-on-click attribute.
+	 * @memberof utils
+	 * @param container	The DOM element.
+	 * @param functions Object of functions that will listen events defined in trigger() -method or data-on-click attributes.
+	 * @param name		The name of the events that are listened to
+	 */
+	function attachListeners(container, functions, name) {
+
+		var attrName = "data-on-" + name;
+		var namespaced = name + ".from-data-attr";
+
+		container.find("[" + attrName + "]").each( function() {
+			var element = jQuery(this);
+			var invocation = parseFunctionInvocation(element.attr(attrName));
+			var func = functions[invocation.name];
+			if ( func ) {
+				element.on(namespaced, function(event) {
+					var params = invocation.params.slice(0);
+					params.push(event);
+					func.apply(this, params);
+				});
+			}
+		} );
+
+	}
+
+	/** Specifies listeners for events defined in trigger() method or directly in DOM using a special data-attributes.
+	 * @memberof utils
+	 * @param containerId	The id of the DOM element.
+	 * @param functions		Object of functions that will listen events defined in trigger() -method or data-on-click attributes.
+	 * @param onReady		Function that is executed when DOM is ready
+	 */
+	function listeners(containerId, functions, onReady) {
+
+		var container = jQuery("#" + containerId);
+
+		attachListeners(container, functions, "click");
+		attachListeners(container, functions, "dblclick");
+		attachListeners(container, functions, "change");
+		attachListeners(container, functions, "keyup");
+		attachListeners(container, functions, "touchend");
+
+		container.on("cloubi:custom-event.from-data-attr", function(event, name, data) {
+			var func = functions[name];
+			if ( func ) {
+				func(data);
+			}
+		});
+
+		if ( onReady ) {
+			jQuery(document).ready(onReady);
+		}
+
+	}
+
+	/**
+	 * Clears event listeners from the DOM element defined in listeners() -method.
+	 * @memberof utils
+	 * @param container	The container from which listeners are cleared from
+	 * @param name		The type of listeners that are being removed
+	 */
+	function clearListenersOfType(container, name) {
+
+		var attrName = "data-on-" + name;
+		var namespaced = name + ".from-data-attr";
+
+		container.find("[" + attrName + "]").off(namespaced);
+
+	}
+
+	/**
+	 * Clears listeners from container
+	 * @memberof utils
+	 * @param containerId	The id of the container for which listeners are cleared for
+	 */
+	function clearListeners(containerId) {
+
+		var container = jQuery("#" + containerId);
+
+		clearListenersOfType(container, "click");
+		clearListenersOfType(container, "change");
+		clearListenersOfType(container, "keyup");
+		clearListenersOfType(container, "touchend");
+
+		container.off("cloubi:custom-event.from-data-attr");
+
+	}
+
+	/**
+	 * Triggers Cloubi custom event for given DOM element.
+	 * @memberof utils
+	 * @param containerId	The id of the DOM element.
+	 * @param name			The name of the event
+	 * @param data			The event data.
+	 */
+	function trigger(containerId, name, data) {
+
+		var container = jQuery("#" + containerId);
+
+		container.trigger("cloubi:custom-event", [name, data]);
+
+	}
+
+	/**	Sets the given element as editable
+	 * @memberof utils
+	 * @param element	The element that is going to be edited
+	 * @param callback	Callback function that is called once the element has been edited
+	 */
+	function editable(element, callback) {
+
+		var text = element.text();
+
+		var editor = jQuery('<div class="cloubi-text-editable"></div>');
+		var field = jQuery('<input type="text" />');
+		var saveButton = jQuery('<button class="btn"><span class="fa fa-check"></span></button>');
+		var cancelButton = jQuery('<button class="btn"><span class="fa fa-times"></span></button>');
+
+		field.val(text);
+		editor.append(field, saveButton, cancelButton);
+
+		function doSave() {
+			callback(field.val(), element);
+			element.show();
+			editor.remove();
+		}
+
+		field.keyup( function(e) {
+			if ( e.keyCode == 13 ) {
+				doSave();
+			}
+		});
+
+		cancelButton.click(function() {
+			element.show();
+			editor.remove();
+		});
+
+		saveButton.click(doSave);
+
+		element.hide();
+
+		element.parent().append(editor);
+
+	}
+
+	/**
+	 * Returns session storage for the current page
+	 * @memberof utils
+	 * @return {Object} Session storage, if available
+	 */
+	function getStorage() {
+
+		try {
+
+			if ( window.sessionStorage ) {
+				var json = window.sessionStorage.getItem("Cloubi");
+				if ( json != null ) {
+					return JSON.parse(json);
+				}
+			}
+
+		} catch ( error ) {}
+
+		return {};
+
+	}
+
+	/**
+	 * Sets the session storage for the current page
+	 * @memberof utils
+	 * @param data	Session storage data
+	 */
+	function setStorage(data) {
+
+		try {
+
+			if ( window.sessionStorage ) {
+				window.sessionStorage.setItem("Cloubi", JSON.stringify(data));
+			}
+
+		} catch ( error ) {}
+
+	}
+
+	/**
+	 * This is a helper method to handle window.sessionStorage.
+	 *	If one wants to use the session storage, this method has to be used so that the session storage works perfectly in Cloubi 2.0.
+	 *	The namespace ensures that there can be multiple separate stores within the session storage.
+	 *	Puts value to session store.
+	 * @memberof utils
+	 * @param namespace		The name of the store.
+	 * @param key			The name for the value in the store.
+	 * @param value			The value put into the store.
+	 */
+	function putToSessionStore( namespace, key, value ) {
+		var data = getStorage();
+		data[namespace] = data[namespace] || {};
+		data[namespace][key] = value;
+		setStorage(data);
+	}
+
+	/**
+	 * Gets value from session store.
+	 * @memberof utils
+	 * @param namespace	The name of the store
+	 * @param key		The name for the value in the store.
+	 * @return {object}	The value put in the store. If the store has no value for the specified namespace and the key then null is returned.
+	 *
+	 */
+	function getFromSessionStore( namespace, key ) {
+		var data = getStorage();
+		if ( data[namespace] ) {
+			return data[namespace][key];
+		}
+		return null;
+	}
+
+	/**
+	 * Clears the store for the specified namespace from the session storage.
+	 * @memberof utils
+	 * @param namespace	The name of the store to clear
+	 */
+	function clearSessionStore( namespace ) {
+		var data = getStorage();
+		data[namespace] = {};
+		setStorage(data);
+	}
+
+	/**
+	 * Adds query parameter to url.
+	 * @memberof utils
+	 * @param url		Url where the query parameter is added
+	 * @param name		This will be set as query parameter name. Assumes that name complies with the query parameter name syntax rules
+	 * @param value		This will be set as query parameter value. Value is uri encoded so it can contain URI reserved characters
+	 * @return {string}	Url with the new query parameter added on it.
+	 */
+	function addUrlParameter(url, name, value) {
+	    if (url.indexOf('?') == -1) {
+	    	url = url + '?';
+	    }
+
+	    if (url.indexOf('=') >= 0) {
+	    	url = url + '&';
+	    }
+
+	    url = url + name + '=' + encodeURIComponent(value);
+	    return url;
+	}
+
+	/**
+	 * This method fetches GET parameter values.
+	 * @memberof utils
+	 * @param name		The name of the parameter that is returned
+	 * @return {string}	Parameter value
+	 */
+	function getUrlParameter(name) {
+	    var match = RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
+	    return match && decodeURIComponent(match[1].replace(/\+/g, ' '));
+	}
+
+	/**
+	 * Checks if the url has pathPart in its path. Here pathPart means the string between slashes in the path.
+	 * @memberof utils
+	 * @param name			Specifies the part of the path to find from the url path.
+	 * @return {boolean}	true, if the path part was found, otherwise false
+	 */
+	function hasUrlPathPart(name) {
+	    var pathParts = window.location.pathname.split('/');
+	    if (pathParts.length == 0)return false;
+
+	    return pathParts.indexOf(name) >= 0;
+
+	}
+
+	/**
+	 * Removes all css classes from element that starts with wildcard -parameter
+	 * @memberof utils
+	 * @param wildcard		Key used in removal operation of the element css classes
+	 * @param obj			The object from which classes are removed from
+	 * @return {function}
+	 */
+	function removeClassesWithWildcard(wildcard, obj) {
+
+		var patt = new RegExp('\\b' + wildcard + '\\S+',"g");
+
+		obj.removeClass(function (index, className) {
+			return (className.match(patt) || []).join(' ');
+		});
+
+	}
+
+	/**
+	 * Checks if a string starts with a certain prefix
+	 * @memberof utils
+	 * @param str			The string that is being checked for the prefix
+	 * @param prefix		The prefix for which the string is being checked for
+	 * @return {boolean}	True if string starts with the given prefix
+	 */
+	function stringStartsWith( str, prefix ) {
+
+		return str.indexOf(prefix) === 0;
+
+	}
+
+
+	function initCssFileCache() {
+		if ( cssFileCache == null ) {
+			cssFileCache = {};
+			jQuery("head link").each(function() {
+				var href = jQuery(this).attr("href");
+				cssFileCache[href] = true;
+			});
+		}
+	}
+
+	/**
+	 * Links given css file to the document
+	 * @memberof utils
+	 * @param cssFile	The css file that is being linked to the document
+	 */
+	function loadCSS(cssFile) {
+
+		initCssFileCache();
+
+		if ( cssFileCache[cssFile] ) {
+			return;
+		}
+
+		cssFileCache[cssFile] = true;
+
+		jQuery("<link>").appendTo("head").attr({type: "text/css", rel: "stylesheet"}).attr("href", cssFile);
+
+	}
+	
+	/**
+	 * Makes the loadCSS function ignore given css file. Use this if the css declarations are already loaded some other way.
+	 * @memberof utils
+	 * @param cssFile	The css file to be ignored.
+	 */
+	function markCSSLoaded(cssFile) {
+		initCssFileCache();
+		cssFileCache[cssFile] = true;
+	}
+
+	/** Registers an extension
+	 * @memberof utils
+	 * @param name		Name of the extension being registered
+	 * @param callback
+	 */
+	function registerExtension(name, callback) {
+
+		if ( extensions[name] ) {
+
+			extensions[name].callbacks.push(callback);
+
+			if ( extensions[name].data ) {
+				callback(extensions[name].data);
+			}
+
+		} else {
+
+			extensions[name] = {
+				callbacks: [callback]
+			};
+
+		}
+
+	}
+
+	/**
+	 * @memberof utils
+	 * @param name
+	 * @param data
+	 */
+	function extensionReady(name, data) {
+
+		if ( extensions[name] ) {
+
+			extensions[name].data = data;
+
+			jQuery.each(extensions[name].callbacks, function(index, func) {
+				func(data);
+			});
+
+		} else {
+
+			extensions[name] = {
+				callbacks: [],
+				data: data
+			};
+
+		}
+
+	}
+
+	/**
+	 * Returns a function, that, as long as it continues to be invoked, will not be triggered.
+	 * The function will be called after it stops being invoked for N milliseconds.
+	 * If 'immediate' is passed, trigger the function on the leading edge, instead of trailing.
+	 * @memberof utils
+	 * @param func			The function that is returned
+	 * @param wait
+	 * @param immediate		Is function triggered on the leading edge
+	 * @return {function}	The function that is called after it stops being invoked
+	 */
+	function debounce(func, wait, immediate) {
+		var timeout;
+		return function() {
+			var context = this, args = arguments;
+			var later = function() {
+				timeout = null;
+				if (!immediate) func.apply(context, args);
+			};
+			var callNow = immediate && !timeout;
+			clearTimeout(timeout);
+			timeout = setTimeout(later, wait);
+			if (callNow) func.apply(context, args);
+		};
+	}
+
+	/**
+	 * Loops all properties of JS -object. Property handler is called for each looped property.
+	 * @memberof utils
+	 * @param obj	JavaScript object whose properties are looped.
+	 * @param func	TThis handler is called for each property.
+	 */
+	function loopProperties(obj, func) {
+
+
+	    for (var prop in obj) {
+
+	    	// skip loop if the property is from prototype
+	        if(!obj.hasOwnProperty(prop)) continue;
+
+	        func(obj, prop);
+		}
+	}
+
+	/**
+	 * Returns an array of visible pages that are set as checked in the given table
+	 * @memberof utils
+	 * @param table
+	 */
+	function getVisibleSelectedPages(table) {
+
+		var pageIds = [];
+
+		var inputs = jQuery(table).find(".page-selected:checked");
+
+		jQuery.each(inputs, function() {
+
+			if ( jQuery(this).closest("tr").is(":visible") ) {
+				pageIds.push(jQuery(this).attr("data-tt-id"));
+			}
+
+
+		});
+
+		return pageIds;
+
+	}
+
+
+	/**
+	 * Returns translation for the wanted language based on key and languageId
+	 * @memberof utils
+	 * @param key			Key of the sentence/word that is being returned
+	 * @param languageId	Language Id
+	 * @param extraParams	Extra parameters
+	 * @return {string} 	The translated sentence/word for the wanted language based on given language Id
+	 *
+	 */
+	function getLanguageValue(key, languageId, extraParams) {
+		return Language.get(key, languageId, extraParams);
+	}
+
+	/**Generates a render url
+	 * @memberof utils
+	 * @param namespace	A portlet namespace as generated by the portlet:namespace tag
+	 * @param view		The name of the view to load
+	 * @return	A url that can be used to load the specified view*/
+	function getRenderUrl(namespace, view){
+		//Strip leading and trailing underscores
+		if (namespace.startsWith("_")){
+			namespace = namespace.substr(1);
+		}
+		if (namespace.endsWith("_")){
+			namespace = namespace.slice(0, -1);
+		}
+		//Use current location as a base
+		var url = location.href;
+		//Add portlet ID
+		url = addUrlParameter(url, "p_p_id", namespace);
+		//Lifecycle 0 == view
+		url = addUrlParameter(url, "p_p_lifecycle", 0);
+		url = addUrlParameter(url, "p_p_state", "exclusive");
+		url = addUrlParameter(url, "p_p_mode", "view");
+		//Add view identifier
+		url = addUrlParameter(url, "_" + namespace + "_view", view);
+		return url;
+	}
+
+	/**Generates an action url
+	 * @memberof utils
+	 * @param namespace	A portlet namespace as generated by the portlet:namespace tag
+	 * @param action	The name of the action
+	 * @return	A url that can be used to execute the action*/
+	function getActionUrl(namespace, action){
+		//Strip leading and trailing underscores
+		if (namespace.startsWith("_")){
+			namespace = namespace.substr(1);
+		}
+		if (namespace.endsWith("_")){
+			namespace = namespace.slice(0, -1);
+		}
+		//Use current location as a base
+		var url = location.href;
+		//Add portlet ID
+		url = addUrlParameter(url, "p_p_id", namespace);
+		//Lifecycle 1 == action
+		url = addUrlParameter(url, "p_p_lifecycle", 1);
+		url = addUrlParameter(url, "p_p_state", "exclusive");
+		url = addUrlParameter(url, "p_p_mode", "view");
+		//Add action identifier
+		url = addUrlParameter(url, "_" + namespace + "_javax.portlet.action", action);
+		//Add auth token
+		url = addUrlParameter(url, "p_auth", Liferay.authToken);
+		return url;
+	}
+
+	/**Transplants query parameters from an URL to the current URL
+	 * @memberof utils
+	 * @param url	A URL that has query parameters
+	 * @return	The current base URL with the query parameters of the specified URL*/
+	function moveParamsToCurrentUrl(url){
+		var params = url.split("?")[1];
+		return location.href.split("?")[0] + "?" + params;
+	}
+
+	/**Scrolls the page until the specified element is visible. If the element is larger than screen height, the screen will be scrolled to show the
+	 * top of the element and as much of its body as possible
+	 * @memberof utils
+	 * @param $elem	A jQuery object specifying the element to show
+	 * @param topOffset	The number of pixels to leave at the top for header bars etc. (default: 110)*/
+	function scrollElementIntoView($elem, topOffset){
+		topOffset = topOffset || 110;
+
+		//Get the top edge of the element
+		var elemTop = $elem.offset().top;
+		//Calculate position of the element's bottom edge
+    	var elemBottom = elemTop + $elem.height();
+    	//Get the top edge of the screen
+    	var screenTop = window.scrollY;
+    	//Calculate the current position of the screen's bottom edge
+    	var screenBottom = screenTop + window.innerHeight;
+
+    	//Check if the top of the screen is visible
+    	if (elemTop < screenTop + topOffset){
+    		//If not, scroll up until the element is in view
+    		$("html, body").animate({ scrollTop: elemTop - 10 - topOffset }, 250);
+    	}
+    	//Check if the bottom of the element is visible
+    	else if (elemBottom > screenBottom){
+    		var target;
+    		//If the element doesn't fit on the screen, show as much as possible
+    		if ($elem.height() > window.innerHeight){
+    			target = elemTop - 10 - topOffset;
+    		}
+    		else {
+    			//Otherwise scroll down to show the entire element
+    			target = elemBottom - window.innerHeight + 10;
+    		}
+    		//scroll the element into view
+    		$("html, body").animate({ scrollTop: target }, 250);
+    	}
+    }
+
+    /**
+     * Generates a random UUID.
+     * @memberOf utils
+     * @return {string} The generated UUID.
+     */
+	function randomUUID() {
+		return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, function(c) {
+			return (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16);
+		});
+	}
+	
+	function deepEqual(a, b){
+		if (a === b) return true;
+		if (typeof a !== typeof b) return false;
+		if (typeof a === 'object' || typeof a === 'array') {
+			var equal = true;
+			$.each(a, function(key){
+				if (!deepEqual(a[key], b[key])){
+					equal = false;
+					return false; //break
+				}
+			});
+			return equal;
+		}
+		return false;
+	}
+	
+	function deepExtend(target, source) {
+		for (var property in source) {
+			if (property in target && typeof target[property] === 'object') {
+				deepExtend(target[property], source[property]);
+			} else {
+				target[property] = source[property];
+			}
+		}
+		return target;
+	}
+
+	return {
+		get: get,
+		getHtml: getHtml,
+		post: post,
+		postWithRequestData: postWithRequestData,
+		postUntilSuccessful: postUntilSuccessful,
+		upload: upload,
+		reload: reload,
+		listeners: listeners,
+		clearListeners: clearListeners,
+		pollUntilReady: pollUntilReady,
+		editable: editable,
+		trigger: trigger,
+		putToSessionStore: putToSessionStore,
+		getFromSessionStore: getFromSessionStore,
+		clearSessionStore: clearSessionStore,
+		addUrlParameter: addUrlParameter,
+		getUrlParameter: getUrlParameter,
+		hasUrlPathPart: hasUrlPathPart,
+		removeClassesWithWildcard: removeClassesWithWildcard,
+		stringStartsWith: stringStartsWith,
+		loadCSS: loadCSS,
+		markCSSLoaded: markCSSLoaded,
+		debounce: debounce,
+		loopProperties: loopProperties,
+		getVisibleSelectedPages: getVisibleSelectedPages,
+		registerExtension: registerExtension,
+		extensionReady: extensionReady,
+		getLanguageValue: getLanguageValue,
+		isDraggingOn: isDraggingOn,
+		attachListeners: attachListeners,
+		getRenderUrl: getRenderUrl,
+		getActionUrl: getActionUrl,
+		moveParamsToCurrentUrl: moveParamsToCurrentUrl,
+		scrollElementIntoView: scrollElementIntoView,
+		randomUUID: randomUUID,
+		deepEqual: deepEqual,
+		deepExtend: deepExtend
+	};
+
+});
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/playlists', ['./utils', './material'], function(utils, material) {
+
+	/**
+	 *
+	 * Contains functions for loading and manipulating playlists.
+	 * A playlist is a named list of product pages, created by users, usually teachers.
+	 * When students view a playlist, they only see the pages in the playlist and are only
+	 * able to move back and forward in the playlist. <br><br>A 'page' in playlist can either be
+	 * an actual page of Cloubi product, file in media bank or file uploaded by the teacher.
+	 * Support for media bank and teacher uploaded files requires the Related Content API. Without
+	 * it, playlists can contain only normal pages.
+	 * <br><br>
+	 *
+	 * To use this API, load it like this:
+	 * <pre><code>
+	 * require(['fi.cloubi.frontend/playlists'], function(playlists) {
+	 * 	playlists.getPlaylists(function(lists) {
+	 * 		console.log(lists);
+	 * 	});
+	 * });
+	 * </code></pre>
+	 *
+	 * This API focuses mainly on manipulating the actual playlists. To view a playlist, coordinated
+	 * effort of this API, material.js API and the theme itself is required. It's done like this:
+	 *
+	 * <ol>
+	 * 	<li>Register a listener with <code>material.onPlaylistChange()</code> function.</li>
+	 * 	<li>Call <code>viewPlaylist(id)</code> or <code>viewPlaylistByCode(id)</code> function.</li>
+	 *  <li>Callback registered with material.onPlaylistChange will be called. Change the theme to playlist mode:
+	 *  	hide navigation and tools, show playlist title and progress indicator.</li>
+	 *  <li>To navigate the playlist, use <code>material.changeToNextPage()</code> and
+	 *  	<code>changeToPreviousPage()</code> functions. These functions should be used anyways to
+	 *  	change to next and previous page, whether in playlist mode or not.</li>
+	 *  <li>Whenever page changes (listen with material.onPageChange function), call
+	 *  	<code>getActivePlaylistStatus()</code> and update playlist progress indicator with the information returned.</li>
+	 *  <li>Close playlist mode by calling <code>closePlaylist()</code>. This will again trigger the listener
+	 *  	registed previously with <code>material.onPlaylistChange()</code>.</li>
+	 * </ol>
+	 *
+	 * So the theme must actually implement a separate playlist view mode. In this mode, normal navigation
+	 * is disabled, only the previous and next buttons are visible. Then there is some sort of playlist
+	 * progress indicator, which tells what playlist is open. Playlist mode is kinda like a separate product
+	 * with only those pages in that order.
+	 * <br><br>
+	 *
+	 * A single playlist can contain pages from multiple products, or be associated with a particular material. Students can open
+	 * playlist created by teachers (this is the whole point of playlists). If a playlist has a page that students do not have a permission
+	 * to view, that page is trimmed from the playlist when student loads it.
+	 *
+	 * @namespace playlists
+	 *
+	 **/
+
+
+
+	/* TYPE DEFINITIONS */
+
+	/**An object representing a playlist
+	 * @memberof playlists
+	 * @mixes playlists.PlaylistMeta
+	 * @typedef {Object} Playlist
+	 * @property {string} shareCode						The share code of the playlist
+	 * @property {string} shareURL						The URL to open this playlist
+	 * @property {playlists.PlaylistPage[]} pages		An array of pages in the list*/
+
+	/**A single page in a playlist
+	 * @memberof playlists
+	 * @typedef {Object} PlaylistPage
+	 * @property {string} materialId					The material ID of this playlist page
+	 * @property {string} pageId						The page ID of this playlist page
+	 * @property {string} [relatedContentId]			The related content ID of this playlist page
+	 * @property {string} [pageTitle]					Title of the page, if available is true.
+	 * @property {string} [materialTitle]				Title of the material, if available is true.
+	 * @property {string} [relatedContantTitle]			Title of the related content, if available is true.
+	 * @property {boolean} available					True, if current user still has access to this page/related content.*/
+
+
+	/**An object representing a playlist metadata.
+	 * @memberof playlists
+	 * @mixin
+	 * @typedef {Object} PlaylistMeta
+	 * @property {string} id							The ID of the playlist
+	 * @property {string} name							The name of the playlist
+	 * @property {string} description					The description of the playlist
+	 * @property {boolean} visible						If true, anyone with the code can open the playlist*/
+
+
+
+
+	/* CALLBACK DEFINITIONS */
+
+	/**A callback to receives playlists.
+	 * @memberof playlists
+	 * @callback PlaylistsCallback
+	 * @param {playlists.Playlist[]} playlists	An array containing the playlists*/
+
+	/**A callback to receive a playlist.
+	 * @memberof playlists
+	 * @callback PlaylistCallback
+	 * @param {playlists.Playlist} playlist		The playlist or null if no such playlist exists.*/
+
+	/**A callback to receive information about playlist deletion.
+	 * @memberof playlists
+	 * @callback DeleteCallback
+	 * @param {boolean} success					True, if the playlist was successfully deleted.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist'</ul>*/
+
+	/**A callback to receive information about playlist update.
+	 * @memberof playlists
+	 * @callback UpdateCallback
+	 * @param {boolean} success					True, if the playlist was successfully updated.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'cannot-associate-playlist-with-material'</ul>*/
+
+	/**A callback to receive information about playlist creation.
+	 * @memberof playlists
+	 * @callback CreateCallback
+	 * @param {boolean} success					True, if the playlist was successfully created.
+	 * @param {playlists.Playlist} [playlist]	The just created playlist.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'no-permission-to-create-playlist' <li>'failed-to-create-playlist'</ul>*/
+
+	/**A callback to receive information about adding page to a playlist.
+	 * @memberof playlists
+	 * @callback AddCallback
+	 * @param {boolean} success					True, if the page was successfully added.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-already-in-playlist' <li>'invalid-page' <li>'page-from-unassociated-material'</ul>*/
+
+	/**A callback to receive information about removing page from a playlist.
+	 * @memberof playlists
+	 * @callback RemoveCallback
+	 * @param {boolean} success					True, if the page was successfully removed.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-not-in-playlist' <li>'invalid-page'</ul>*/
+
+	/**A callback to receive information about moving a page in a playlist.
+	 * @memberof playlists
+	 * @callback SortCallback
+	 * @param {boolean} success					True, if the page was successfully moved.
+	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-not-in-playlist' <li>'invalid-page'</ul>*/
+
+	/**A callback to be called when playlist is in view mode.
+	 * @memberof playlists
+	 * @callback ViewCallback
+	 * @param success							True of the playlist was successfully opened, false otherwise*/
+
+	/**A callback to get the playlist status.
+	 * @memberof playlists
+	 * @callback StatusCallback
+	 * @param {boolean} hasPlaylist						True, if there is an active playlist.
+	 * @param {playlists.PlaylistMeta} [playlist]		Metadata of the current playlist.
+	 * @param {number} [pageIndex]						Index of the current page in playlist. Zero means the first page.
+	 * @param {number} [pagesTotal]						Number of the pages in current playlist.
+	 * */
+
+	/**A callback to be called when playlist is closed.
+	 * @memberof playlists
+	 * @callback CloseCallback*/
+
+
+
+	/* FUNCTION IMPLEMENTATIONS */
+
+
+	/**
+	 * Get all the playlist created by current user.
+	 * @memberof playlists
+	 * @param {playlists.PlaylistsCallback} callback			A callback to receive the playlists.
+	 */
+	function getPlaylists(callback) {
+		utils.get('/o/playlists/playlists', function(response) {
+			callback(response.playlists);
+		});
+	}
+
+	/**
+	 * Get all playlists associated with the given material id.
+	 * @memberof playlists
+	 * @param {number}                     materialId           The ID of a Cloubi material.
+	 * @param {playlists.PlaylistCallback} callback             A callback to receive the playlists.
+	 */
+	function getPlaylistsForMaterial(materialId, callback) {
+		utils.get('/o/playlists/playlists?materialId=' + materialId, function(response) {
+			callback(response.playlists);
+		});
+	}
+
+	/**
+	 * Get a playlist with given id.
+	 * @memberof playlists
+	 * @param {string} playlistId								The ID of the playlist
+	 * @param {playlists.PlaylistCallback} callback				A callback to receive the playlist.
+	 */
+	function getPlaylist(playlistId, callback) {
+		doGetPlaylist(playlistId, null, false, callback);
+	}
+
+
+	/**
+	 * Get a playlist with given share code.
+	 * @memberof playlists
+	 * @param {string} code										The share code of the playlist
+	 * @param {playlists.PlaylistCallback} callback				A callback to receive the playlist.
+	 */
+	function getPlaylistByCode(code, callback) {
+		doGetPlaylist(null, code, false, callback);
+	}
+
+
+	function doGetPlaylist(playlistId, code, trimPages, callback) {
+		var data = { trim: trimPages };
+		if ( playlistId ) {
+			data.id = playlistId;
+		}
+		if ( code ) {
+			data.code = code;
+		}
+		utils.post('/o/playlists/playlist', data, function(response) {
+			callback(response.playlist ? response.playlist : null);
+		});
+	}
+
+
+
+	/**
+	 * Checks is current user is allowed to create and modify playlists. All users can
+	 * view playlists, but usually only teachers are allowed to create them.
+	 * @memberof playlists
+	 * @return {boolean}										True, if current user can create new playlists.
+	 */
+	function isAllowedToCreatePlaylists() {
+		return Cloubi.playlists.canCreatePlaylists;
+	}
+
+
+	/**
+	 * Deletes a playlist with given id.
+	 * @memberof playlists
+	 * @param {string} playlistId								The ID of the playlist to delete.
+	 * @param {playlists.DeleteCallback} callback				A callback to be called when operation is completed.
+	 */
+	function deletePlaylist(playlistId, callback) {
+		utils.post('/o/playlists/delete', {id: playlistId}, function(response) {
+			callback(response.success);
+		});
+	}
+
+
+	/**
+	 * Updates metadata of a playlist with given id.
+	 * @memberof playlists
+	 * @param {string} playlistId								The ID of the playlist to update.
+	 * @param {playlists.PlaylistMeta} data						The new metadata. The id attribute is ignored and
+	 * 															missing attributes are not updated.
+	 * @param {playlists.UpdateCallback} callback				A callback to be called when operation is completed.
+	 */
+	function updatePlaylist(playlistId, data, callback) {
+		utils.post('/o/playlists/update', {id: playlistId, data: data}, function(response) {
+			callback(response.success);
+		});
+	}
+
+
+	/**
+	 * Creates a new, empty playlist.
+	 * @memberof playlists
+	 * @param {playlists.PlaylistMeta} data						The metadata for the new playlist. The id attribute is ignored.
+	 * @param {playlists.CreateCallback} callback				A callback to be called when operation is completed.
+	 */
+	function createPlaylist(data, callback) {
+		utils.post('/o/playlists/create', data, function(response) {
+			callback(response.success, response.playlist);
+		});
+	}
+
+
+
+	/**
+	 * Adds a page to the end of existing playlist. If the page already exists in the playlist,
+	 * this function does nothing.
+	 * @memberof playlists
+	 * @param {playlists.PlaylistPage} page						The page to be added.
+	 * @param {string} playlistId								The ID of the playlist to add the page to.
+	 * @param {playlists.AddCallback} callback					A callback to be called when operation is completed.
+	 */
+	function addToPlaylist(page, playlistId, callback) {
+		utils.post('/o/playlists/add', {id: playlistId, page: page}, function(response) {
+			callback(response.success);
+		});
+	}
+
+
+	/**
+	 * Adds the current page to the end of existing playlist. If the page already exists in the playlist,
+	 * this function does nothing.
+	 * @memberof playlists
+	 * @param {string} playlistId								The ID of the playlist to add the page to.
+	 * @param {playlists.AddCallback} callback					A callback to be called when operation is completed.
+	 */
+	function addCurrentPageToPlaylist(playlistId, callback) {
+		addToPlaylist({
+			materialId: material.getCurrentMaterialId(),
+			pageId: material.getCurrentPageId()
+		}, playlistId, callback);
+	}
+
+
+
+	/**
+	 * Removes a page from existing playlist. If the page does not exists in the playlist,
+	 * this function does nothing.
+	 * @memberof playlists
+	 * @param {playlists.PlaylistPage} page						The page to be removed. This must be a page object from a playlist returned by this API.
+	 * @param {string} playlistId								The ID of the playlist to remove the page from.
+	 * @param {playlists.RemoveCallback} callback				A callback to be called when operation is completed.
+	 */
+	function removeFromPlaylist(page, playlistId, callback) {
+		utils.post('/o/playlists/remove', {id: playlistId, page: page}, function(response) {
+			callback(response.success);
+		});
+	}
+
+
+	/**
+	 * Moves a page to a new location within a playlist.
+	 * @memberof playlists
+	 * @param {playlists.PlaylistPage} page						The page to be moved. This must be a page object from a playlist returned by this API.
+	 * @param {number} index									New location, or index, for the page. Zero means the first page of the playlist.
+	 * @param {string} playlistId								The ID of the playlist.
+	 * @param {playlists.SortCallback} callback					A callback to be called when operation is completed.
+	 */
+	function sortPlaylistItem(page, index, playlistId, callback) {
+		utils.post('/o/playlists/sort', {id: playlistId, index: index, page: page}, function(response) {
+			callback(response.success);
+		});
+	}
+
+
+	/**
+	 * Opens a playlist for viewing.
+	 * @memberof playlists
+	 * @param {string} playlistId								The ID of the playlist.
+	 * @param {playlists.ViewCallback} callback					A callback to be called when playlist view mode is open.
+	 * 															Listeners registered with <code>material.onPlaylistChange()</code>
+	 * 															will be called before this.
+	 * @param {?integer} pageNumber								The number of the page to start from
+	 */
+	function viewPlaylist(playlistId, callback, pageNumber) {
+		doGetPlaylist(playlistId, null, true, function(playlist) {
+			if ( playlist ) {
+				material.setCurrentPlaylist(playlist, pageNumber);
+				callback(true);
+			}
+			else {
+				callback(false);
+			}
+		});
+	}
+
+
+	/**
+	 * Opens a playlist for viewing.
+	 * @memberof playlists
+	 * @param {string} code										The share code of the playlist
+	 * @param {playlists.ViewCallback} callback					A callback to be called when playlist view mode is open.
+	 * 															Listeners registered with <code>material.onPlaylistChange()</code>
+	 * 															will be called before this.
+	 */
+	function viewPlaylistByCode(code, callback) {
+		doGetPlaylist(null, code, true, function(playlist) {
+			if ( playlist ) {
+				material.setCurrentPlaylist(playlist);
+				callback(true);
+			}
+			else {
+				callback(false);
+			}
+		});
+	}
+
+
+	/**
+	 * Gets information about current playlist, if there is one.
+	 * @memberof playlists
+	 * @param {playlists.StatusCallback} callback					A callback to receive the status information.
+	 */
+	function getActivePlaylistStatus(callback) {
+		var current = material.getCurrentPlaylist();
+		if ( current ) {
+			var pageSource = material.getPageSource();
+			callback(true, current, pageSource.getCurrentPageIndex(), current.pages.length);
+		} else {
+			callback(false);
+		}
+	}
+
+
+	/**
+	 * Closes currently open playlist, if there is one.
+	 * @memberof playlists
+	 * @param {playlists.CloseCallback} callback					A callback to be called when playlist is closed.
+	 * 																Listeners registered with <code>material.onPlaylistChange()</code>
+	 * 																will be called before this.
+	 */
+	function closePlaylist(callback) {
+		material.setCurrentPlaylist(null);
+		callback();
+	}
+
+
+	/**
+	 * Open playlist automatically if user opened /o/open-playlist/<id> URL.
+	 */
+	material.onMaterialReady(function() {
+
+		// Do we have a playlist to automatically open?
+		if ( Cloubi.playlists.playlistId ) {
+
+			// This should prevent the playlist from being opened twice or something..
+			var id = Cloubi.playlists.playlistId;
+			Cloubi.playlists.playlistId = null;
+
+			var pageNum = Cloubi.playlists.playlistPage;
+
+			// Check if the playlist portlet is also on the page,
+			// as it will also try to automatically open the playlist.
+			if ( jQuery('#portlet_fi_cloubi_portlet_playlist_PlaylistPortlet').length == 0 ) {
+				viewPlaylist(id, function() {}, pageNum);
+			}
+
+		}
+
+	});
+
+
+	/* PUBLIC FUNCTIONS */
+
+	return {
+		getPlaylists: getPlaylists,
+		getPlaylistsForMaterial: getPlaylistsForMaterial,
+		getPlaylist: getPlaylist,
+		getPlaylistByCode: getPlaylistByCode,
+		isAllowedToCreatePlaylists: isAllowedToCreatePlaylists,
+		deletePlaylist: deletePlaylist,
+		updatePlaylist: updatePlaylist,
+		createPlaylist: createPlaylist,
+		addToPlaylist: addToPlaylist,
+		addCurrentPageToPlaylist: addCurrentPageToPlaylist,
+		removeFromPlaylist: removeFromPlaylist,
+		sortPlaylistItem: sortPlaylistItem,
+		viewPlaylist: viewPlaylist,
+		viewPlaylistByCode: viewPlaylistByCode,
+		getActivePlaylistStatus: getActivePlaylistStatus,
+		closePlaylist: closePlaylist
+	};
+
+});
+
+
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/user-accounts', ['./utils'], function(utils) {
+
+	/**
+	 Contains functions for creating new user accounts, logging in, logging out and updating current user's details.
+	 <br><br>
+	 These function are intended to be used within the materials. For example, students could first start using a material 
+	 anonymously, i.e. without logging in, and then at later time register a new Cloubi user account so he/she can continue later.
+	 <br><br>
+	 
+	 To use this API, load it like this:
+	 
+	 <pre><code>
+require(['fi.cloubi.frontend/account'], function(accounts) {
+	accounts.getUserInfo(function(info) {
+		console.log(info);
+	});
+});
+	 </code></pre>
+	 
+	 * @namespace accounts */
+	
+	/**A callback for functions that will produce an UserInfo object.
+	 * @memberof accounts
+	 * @callback userInfoCallback
+	 * @param {?accounts.UserInfo} info		Information about current account or null if user is not logged in.*/
+	
+	/**A callback that will receive information about login attempt.
+	 * @memberof accounts
+	 * @callback loginCallback
+	 * @param {boolean} success					True, if the login attempt was successful. False, if user account does not exists or password is invalid.
+	 * 											For security reasons, missing account and wrong password produce the same error.
+	 */
+	
+	/**A callback that will be called after user has logged out.
+	 * @memberof accounts
+	 * @callback logoutCallback*/
+	
+	/**A callback that will receive information about user account update attempt.
+	 * @memberof accounts
+	 * @callback updateUserCallback
+	 * @param {boolean} success					True, if the login attempt was successful.
+	 * @param {Array.<string>} errors			If <code>success</code> is false, this array contains one or more of the following
+	  											error conditions: 'invalid-email', 'duplicate-email', 'first-name-empty', 'last-name-empty',
+	 											'invalid-password', 'passwords-do-not-match', 'too-short-password', 'too-trivial-password',
+	 											'edit-accounts-not-enabled', 'duplicate-username'.
+	 */
+	
+	/**A callback that will receive information about user account creation.
+	 * @memberof accounts
+	 * @callback registerUserCallback
+	 * @param {boolean} success					True, if the new user account was successfully created and user logged in. If false, possible
+	 											current user was not logged out.
+	 * @param {Array.<string>} errors			If <code>success</code> is false, this array contains one or more of the following
+	  											error conditions: 'invalid-email', 'duplicate-email', 'first-name-empty', 'last-name-empty',
+	 											'passwords-do-not-match', 'too-short-password', 'too-trivial-password', 'signup-not-enabled',
+	 											'duplicate-username'.
+	 */
+	
+	/**A callback that will called after a password reset link has been sent.
+	 * @memberof accounts
+	 * @callback resetLinkCallback
+	 */
+	
+	
+	
+	
+	/**An object representing the user account for logged in user. Some attributes are only used when updating the user account,
+	 * like password and newPassword. Some attributes cannot be updated, like the id. It depends on the server's configuration
+	 * wheter or not the email address can be changed.
+	 * @memberof accounts
+	 * @typedef {Object} UserInfo
+	 * @property {?string} id					The user ID.
+	 * @property {?string} firstName			First name of the user.
+	 * @property {?string} lastName				Last name of the user.
+	 * @property {?string} username				The username of the user.
+	 * @property {?string} email				Email address of the user.
+	 * @property {?string} password				User's current password.
+	 * @property {?string} newPassword			New password for the user.
+	 * @property {?string} newPasswordAgain		New password again.
+	 */
+	
+	
+	/**An object representing the global configuration of user accounts, such as wheter is possible to create new accounts or not.
+	 * @memberof accounts
+	 * @typedef {Object} Configuration
+	 * @property {boolean} signup				True, if its possible to create new accounts.
+	 * @property {boolean} editAccounts			True, if its possible to edit existing accounts.
+	 * @property {boolean} emailLogin			True, if login should be done with email address instead of username.
+	 */
+	
+	
+	
+	// This variable is used to hold transient information about user's state (logged in or not)
+	// after logIn, logOut or registerUser has been called. Before calling those functions,
+	// this variable must be null.
+	var loggedInState = null;
+	
+	
+	
+	/**Gets the current global configuration for user accounts.
+	 * @memberof accounts
+	 * @return {accounts.Configuration} The configuration.*/
+	function getConfiguration() {
+		return {
+			signup: Cloubi.userAccountConfig.signup,
+			editAccounts: Cloubi.userAccountConfig.editAccounts,
+			emailLogin: Cloubi.userAccountConfig.emailLogin
+		};
+	}
+	
+	
+	/**Gets information about currently logged in user, if there is one. 
+	 * @memberof accounts
+	 * @param {accounts.userInfoCallback} callback		A callback function that receives the user account info.*/
+	function getUserInfo(callback) {
+		if ( loggedInState ) {
+			callback(loggedInState.user);
+		} else {
+			if ( themeDisplay.isSignedIn() ) {
+				callback({
+					id: Cloubi.currentUser.userId,
+					firstName: Cloubi.currentUser.firstName,
+					lastName: Cloubi.currentUser.lastName,
+					email: Cloubi.currentUser.email,
+					username: Cloubi.currentUser.screenName,
+				});
+			} else {
+				callback(null);
+			}
+		}
+	}
+	
+	/**Checks if there is a logged in user. 
+	 * If there is, then the <code>getUserInfo()</code> function will provide a non-null UserInfo object. 
+	 * @memberof accounts
+	 * @return {boolean} True, if there is a logged in user.*/
+	function isLoggedIn() {
+		if ( loggedInState ) {
+			return loggedInState.loggedIn;
+		} else {
+			return themeDisplay.isSignedIn();
+		}
+	}
+	
+	/**Logins user with provided email address/username and password. If the user is already logged in with another user account,
+	 * then he/she will be first logged out. If the user has already logged in with this account, then this function does nothing.
+	 * Only email address or username can be used, depending on the configuration. See <code>getConfiguration</code>.
+	 * A callback will be called after the user has either successfully logged in or there is an error, like incorrect password.
+	 * It is highly recommended to reload the page after successful login, as rest of the page will be in invalid state.
+	 * @memberof accounts
+	 * @param email {string}						The email address of the user, or null if not used.
+	 * @param username {string}						The username of the user, or null if not used. 
+	 * @param password {string}						The password of the user.
+	 * @param callback {accounts.loginCallback}		A callback function for when the login attempt is completed.
+	 */
+	function logIn(email, username, password, callback) {
+		var loginData = null;
+		if ( getConfiguration().emailLogin ) {
+			if ( email ) {
+				loginData = { email: email, password: password };
+			}
+		} else {
+			if ( username ) {
+				loginData = { username: username, password: password };
+			}
+		}
+		if ( loginData ) {
+			utils.post('/o/user-accounts/sign-in', loginData, function(data) {
+				if (data.success) {
+					loggedInState = { loggedIn: true, user: data.user };
+				}
+				callback(data.success);
+			});
+		} else {
+			callback(false);
+		}
+	}
+	
+	/**Logs out current user. 
+	 * @memberof accounts
+	 * @param callback {accounts.logoutCallback}	A callback function for when the user has logged out. If the user has already logged out, this
+	 												will be called immediately.
+	   @param stayOnPage {boolean}					If true, the browser will stay on the current page and the callback will be triggered after the user has been logged out. 
+	   												Otherwise it will be immediately redirected to the default logout location*/
+	function logOut(callback, stayOnPage) {
+		if ( themeDisplay.isSignedIn() ) {
+			if (stayOnPage) {
+				utils.getHtml('/c/portal/logout', function() {
+					loggedInState = { loggedIn: false, user: null };
+					callback();
+				});
+			}
+			else {
+				window.open('/c/portal/logout', '_self');
+			}
+		} else {
+			callback();
+		}
+	}
+	
+	/**Updates current user's account, like changes the first name or password. 
+	 * @memberof accounts
+	 * @param info {accounts.UserInfo}					The settings to change. Only include the attributes you wish to update. To change the password, you
+	  													must include password, newPassword and newPasswordAgain. Must not contain id attribute.
+	 * @param callback {accounts.updateUserCallback}	A callback function for when the update is completed.
+	 */
+	function updateUser(info, callback) {
+		utils.post('/o/user-accounts/update-account', info, function(data) {
+			callback(data.success, data.errors);
+		});
+	}
+	
+	/**Creates new user's account, and if successful, logins that new user. It is highly recommended to reload the page after successful 
+	 * login, as rest of the page will be in invalid state.
+	 * @memberof accounts
+	 * @param info {accounts.UserInfo}					Settings for the new user account. Must not contain id or password attributes. 
+	 													Must contain newPassword, newPasswordAgain, firstName, and lastName attributes.
+	 													If login by email is enabled, must contains email attribute, otherwise must contain
+	 										 			username attribute.
+	 * @param callback {accounts.registerUserCallback}	A callback function for when the registration is completed.*/
+	function registerUser(info, callback) {
+		utils.post('/o/user-accounts/create-account', info, function(data) {
+			if (data.success) {
+				loggedInState = { loggedIn: true, user: data.user };
+			}
+			callback(data.success, data.errors);
+		});
+	}
+	
+	
+	/**Requests a password reset link to be sent to given email address.
+	 * @memberof accounts
+	 * @param email {string}							The email address to send the reset link. 
+	 * @param callback {accounts.resetLinkCallback}		A callback function for when the link has been sent.*/
+	function passwordRecovery(email, callback) {
+		utils.post('/o/user-accounts/password-recovery', {
+			email: email, lang: Cloubi.currentUser.languageId
+		}, function(data) {
+			callback();
+		});
+	} 
+	
+	
+	return {
+		getConfiguration: getConfiguration,
+		getUserInfo: getUserInfo,
+		isLoggedIn: isLoggedIn,
+		logIn: logIn,
+		logOut: logOut,
+		updateUser: updateUser,
+		registerUser: registerUser,
+		passwordRecovery: passwordRecovery
+	};
+
+});
+
+
 
 define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/notifications', ["./utils", "./dialog", "fi.cloubi.lib.js/offline", "fi.cloubi.lib.js/modernizr-custom", "fi.cloubi.lib.js/jquery-ui"], function(utils, dialogs) {	
 		
@@ -1194,6 +6759,446 @@ define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/notifications', ["./utils", 
 		onSlowConnection: onSlowConnection*/
 	};
 
+});
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/additional-content', ['./utils', './material'], function(utils, material) {
+	
+	/**Contains functions for listing and accessing additional content for material pages. To use this API, load it like this:
+	 
+	 <pre><code>
+	require(['fi.cloubi.frontend/additional-content'], function(ac) {
+		ac.getContents(function(response) {
+			console.log(response);
+		});
+	});
+	 </code></pre>
+	 
+	 Usage:<br><br>
+	 Calling getContents() will return a response with several objects: a files object with all the {@link additionalcontent.Content} files
+	 on the page and two content folders (generally displayed as tabs). Each folder has a list of file IDs inside that folder - these are the
+	 contents that should be displayed when that folder/tab is selected. Each file may be a folder containing files itself, in which case the
+	 IDs are included in that file's additionalContent array. Note that these references may be cyclical (a file may indirectly contain itself),
+	 so the entire folder structure should never be displayed at once.<br>
+	 Files with the popupRenderable flag set to true can be loaded inline into Cloubi by loading the file's contentUrl and inserting the response
+	 HTML into the DOM. Note that when doing this, any script tags in the response MUST be preserved and executed, such as when using jQuery.load().
+	 If a file has a contentUrl but it is not popupRenderable, the contentUrl should be treated as an external link that should be opened 
+	 in a new tab when the file is opened. If a file has the downloadable flag set to true, it can be downloaded by calling getDownloadLink()
+	 with its ID and then opening the response URL as a download link.
+	 <br><br>
+	 
+	 Playlist integration:<br><br>
+	 When the page has loaded, any additional content UI should check if Cloubi.additionalContent.initialContent exists and if so,
+	 attempt to display that content. Note that the content may be some other user's user content that is not included in the list of
+	 all contents received from getContents(), in which case it must be loaded separately with getSingleContent().
+	 <br><br>
+	 To get notified when a playlist changes to an additional content item, listen to page changes like this:
+	 <pre><code>
+	 material.onPageChange(function (page, options, data){
+		//If the page change data has a related content ID, show the related content with that ID
+		if (data.relatedContentId){
+			ac.getSingleContent(data.relatedContentId, data.playlistId, function(response){
+				if (response.success){
+					var contentData = response.files[data.relatedContentId];
+					//Display the content represented by contentData here
+				}
+			});
+		}
+	 });
+	 </code></pre>
+	 
+	 * @namespace additionalcontent */
+	
+	/**Represents an individual piece of additional content
+	 * @memberof additionalcontent
+	 * @typedef {Object} Content
+	 * @property {string[]} additionalContent	An array containing the IDs of any sub-content nested inside this content
+	 * @property {string} contentType			The MIME content type of this content
+	 * @property {string} [contentUrl]			An URL that can be loaded to render the file contents of this content inside Cloubi
+	 * @property {string} description			The description of the content
+	 * @property {boolean} editable				If true, the user can edit the title of this file
+	 * @property {string} id					The unique ID of this content
+	 * @property {boolean} playlistEnabled		If true, the user can add this content to a playlist
+	 * @property {boolean} popupRenderable		True if this content can be rendered by loading the content URL in a modal dialog
+	 * @property {string} title					The name of this file
+	 * @property {string} typeName				The human-readable name of this file's data type
+	 * @property {boolean} downloadable			If true, this content can be downloaded by getting the download URL with {@link additionalcontent.getDownloadLink}*/
+	
+	/**Represents a root content folder
+	 * @memberof additionalcontent
+	 * @typedef {Object} ContentFolder
+	 * @property {string[]} additionalContent	An array containing the IDs of any content contained inside this folder
+	 * @property {boolean} canAdd				True if the user can upload files into this content folder
+	 * @property {number} [maxSize]				The maximum size of files (in bytes) that can be uploaded into this folder if 
+	 * 											this folder supports uploading*/
+	
+	/**A server response object
+	 * @memberof additionalcontent
+	 * @mixin
+	 * @typedef {Object} Response
+	 * @property {boolean} success		True if the request was successful
+	 * @property {string[]} [errors]	An array of errors that were encountered while processing the request*/
+	
+	/**A callback that receives all content on a page
+	 * @memberof additionalcontent
+	 * @callback AllContentCallback
+	 * @param {additionalcontent.Response} response							The server response
+	 * @param {Object.<string, additionalcontent.Content>} [response.files]	An object mapping content IDs to Content objects
+	 * @param {additionalcontent.ContentFolder} [response.libraryFiles]		The library additional content on the page
+	 * @param {additionalcontent.ContentFolder} [response.userFiles]		The user additional content on the page*/
+	
+	/**A callback that receives content that was specifically requested
+	 * @memberof additionalcontent
+	 * @callback ContentCallback
+	 * @param {additionalcontent.Response} response							The server response
+	 * @param {Object.<string, additionalcontent.Content>} [response.files]	An object mapping content IDs to Content objects*/
+	
+	/**A callback that receives a content download URL
+	 * @memberof additionalcontent
+	 * @callback URLCallback
+	 * @param {additionalcontent.Response} response		The server response
+	 * @param {string} [response.downloadUrl]			The requested URL*/
+	
+	/**A generic callback that receives information about an operation's success or failure
+	 * @memberof additionalcontent
+	 * @callback GenericCallback
+	 * @param {additionalcontent.Response} response	The server response*/
+	
+	/**The native JS File type
+	 * @external File
+	 * @see {@link https://developer.mozilla.org/en-US/docs/Web/API/File|File}*/
+	
+	/**Servlet address*/
+	var ENDPOINT = "/o/related-content/";
+	/**Material ID parameter*/
+	var PARAM_MATERIAL_ID = "materialId";
+	/**Page ID parameter*/
+	var PARAM_PAGE_ID = "pageId";
+	/**Content ID parameter*/
+	var PARAM_CONTENT_ID = "fileId";
+	/**Playlist ID parameter*/
+	var PARAM_PLAYLIST_ID = "playlistId";
+	/**File name parameter*/
+	var PARAM_FILENAME = "fileName";
+	
+	/**Loads all additional content for a given material page.
+	 * <br>Can produce the following errors:
+	 * <ul>
+	 * <li><b>no-such-material</b> if the requested material ID does not match any available material
+	 * <li><b>no-such-page</b> if the requested page ID does not match any valid page
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {additionalcontent.AllContentCallback} [callback]	A callback to receive the data
+	 * @param {string} [requestedMaterial=current material id]	The requested material ID of the material containing the page
+	 * @param {string} [pageId=current page id]					The ID of the page whose additional content should be retrieved*/
+	function getContents(callback, requestedMaterial, pageId){
+		var data = {};
+		data[PARAM_MATERIAL_ID] = requestedMaterial || material.getRequestedMaterial();
+		data[PARAM_PAGE_ID] = pageId || material.getCurrentPageId();
+		utils.post(ENDPOINT + "contents", data, callback);
+	}
+	
+	/**Gets the data of an individual additional content file.
+	 * <br>Can produce the following errors:
+	 * <ul>
+	 * <li><b>content-not-available</b> if the requested content ID does not match any available content
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {string} contentId								The ID of the content to get
+	 * @param {string} [playlistId]								The ID of the currently active playlist if any
+	 * @param {additionalcontent.ContentCallback} [callback]	A callback to receive the result*/
+	function getSingleContent(contentId, playlistId, callback){
+		var data = {};
+		data[PARAM_CONTENT_ID] = contentId;
+		data[PARAM_PLAYLIST_ID] = playlistId;
+		utils.post(ENDPOINT + "content", data, callback);
+	}
+	
+	/**Uploads a file to the userFiles additional content folder.
+	 * <br>Can produce the following errors:
+	 * <ul>
+	 * <li><b>invalid-upload</b> if the sent file was not successfully received by the server
+	 * <li><b>upload-not-permitted</b> if the user is not allowed to upload additional content files
+	 * <li><b>upload-failed</b> if the file was received but could not be saved
+	 * <li><b>invalid-upload</b> if the sent file was not successfully received by the server
+	 * <li><b>file-too-large</b> if the sent file was larger than the server allows
+	 * <li><b>no-such-material</b> if the requested material ID does not match any available material
+	 * <li><b>no-such-page</b> if the requested page ID does not match any valid page
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {external:File} file	The file to upload
+	 * @param {string} [name=file.name]														A custom file name for the file
+	 * @param {additionalcontent.GenericCallback} [callback]								A callback to handle the server response
+	 * @param {number} [materialId=current material ID]										The ID of the material to contain the content
+	 * @param {string} [pageId=current page ID]												The ID of the page to contain the content*/
+	function uploadUserFile(file, name, callback, materialId, pageId){
+		var data = {};
+		data[PARAM_MATERIAL_ID] = materialId || material.getCurrentMaterialId();
+		data[PARAM_PAGE_ID] = pageId || material.getCurrentPageId();
+		data[PARAM_FILENAME] = name || file.name;
+		utils.upload(ENDPOINT + "add-file", data, file, callback);
+	}
+	
+	/**Deletes a user-uploaded additional content file.
+	 * <br>Can produce the following errors:
+	 * <ul>
+	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {string} contentId								The ID of the file to delete
+	 * @param {additionalcontent.GenericCallback} [callback]	A callback to handle the server response*/
+	function deleteUserFile(contentId, callback){
+		var data = {};
+		data[PARAM_CONTENT_ID] = contentId;
+		utils.post(ENDPOINT + "delete-file", data, callback);
+	}
+	
+	/**Renames a user-uploaded additional content file.
+	 * C<br>an produce the following errors:
+	 * <ul>
+	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to rename it
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {string} contentId								The ID of the file to delete
+	 * @param {string} name										The new name of the file
+	 * @param {additionalcontent.GenericCallback} [callback]	A callback to handle the server response*/
+	function renameUserFile(contentId, name, callback){
+		var data = {};
+		data[PARAM_CONTENT_ID] = contentId;
+		data[PARAM_FILENAME] = name;
+		utils.post(ENDPOINT + "rename-file", data, callback);
+	}
+	
+	/**Gets a download link to an additional content file. This should only be called immediately before starting the download, as
+	 * the URL may expire over time.
+	 * <br>Can produce the following errors:
+	 * <ul>
+	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
+	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
+	 * </ul>
+	 * @memberof additionalcontent
+	 * @param {string} contentId								The ID of the file to delete
+	 * @param {string} [playlistId]								The ID of the current playlist (if any). Required to download other users' user
+	 * 															content from playlists.
+	 * @param {additionalcontent.URLCallback} [callback]		A callback to handle the server response*/
+	function getDownloadLink(contentId, playlistId, callback){
+		var data = {};
+		data[PARAM_CONTENT_ID] = contentId;
+		data[PARAM_PLAYLIST_ID] = playlistId;
+		utils.post(ENDPOINT + "download-link", data, callback);
+	}
+	
+	return {
+		getContents: getContents,
+		getSingleContent: getSingleContent,
+		uploadUserFile: uploadUserFile,
+		deleteUserFile: deleteUserFile,
+		renameUserFile: renameUserFile,
+		getDownloadLink: getDownloadLink
+	};
+});
+
+define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/rest-client', ['fi.cloubi.lib.js/jquery'], function (jQuery) {
+
+    function RestClient(baseUrl) {
+        this.baseUrl = baseUrl;
+    }
+
+    RestClient.prototype.trackProgress = function (trackerId, progressCallback) {
+        var self = this;
+
+        return new Promise(function (resolve, reject) {
+            self.pollForProgress(trackerId, progressCallback, resolve, reject);
+        });
+    };
+
+    RestClient.prototype.pollForProgress = function (trackerId, progressCallback, success, failure) {
+        var self = this;
+
+        setTimeout(function () {
+            self.updateProgressTracker(trackerId).then(function (progressState) {
+                if (progressCallback != null) {
+                    progressCallback(progressState.percentage, progressState.description, progressState);
+                }
+
+                if (progressState.status === 'error') {
+                    failure(progressState.description);
+                } else if (progressState.status === 'success') {
+                    success(progressState.result);
+                } else {
+                    self.pollForProgress(trackerId, progressCallback, success, failure);
+                }
+            })
+                .catch(function (error) {
+                    failure(error);
+                });
+        }, 500);
+    };
+
+    RestClient.prototype.updateProgressTracker = function (trackerId) {
+        return this.GET('progress/job/' + trackerId);
+    };
+
+    RestClient.prototype.downloadFile = function (handler, downloadId) {
+        var xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function () {
+            if (this.readyState === 4 && this.status === 200) {
+
+                var contentDisposition = this.getResponseHeader("Content-Disposition");
+                var filename = "download";
+
+                if (contentDisposition && contentDisposition.indexOf('attachment') !== -1) {
+                    var filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                    var matches = filenameRegex.exec(contentDisposition);
+                    if (matches != null && matches[1]) {
+                        filename = matches[1].replace(/['"]/g, '');
+                    }
+                }
+
+                var url = window.URL.createObjectURL(this.response);
+                var anchor = document.createElement('a');
+
+                anchor.href = url;
+                anchor.download = filename;
+                anchor.click();
+                window.URL.revokeObjectURL(url);
+            }
+        };
+
+        xhr.open('GET', this.baseUrl + 'download/' + handler + '/' + downloadId);
+        xhr.responseType = 'blob';
+        xhr.send();
+    };
+
+    RestClient.prototype.uploadFile = function (url, files, progressTracker, optionalData) {
+        var self = this;
+
+        return new Promise(function (resolve, reject) {
+            var formData = new FormData();
+
+            if (files instanceof FileList) {
+                for (var i = 0; i < files.length; i++) {
+                    formData.append('encoded-filename', encodeURIComponent(files[i].name));
+                    formData.append('files', files[i]);
+                }
+            } else if (files instanceof File) {
+                formData.append('encoded-filename', encodeURIComponent(files.name));
+                formData.append('files', files);
+            }
+
+            if (optionalData) {
+                Object.keys(optionalData).forEach(function (key) {
+                    if (Array.isArray(optionalData[key])) {
+                        optionalData[key].forEach(function (item) {
+                            formData.append(key, item);
+                        });
+                    } else {
+                        formData.append(key, optionalData[key]);
+                    }
+                });
+            }
+
+            jQuery.ajax({
+                type: 'POST',
+                url: self.baseUrl + url,
+                cache: false,
+                contentType: false,
+                processData: false,
+                data: formData,
+                enctype: 'multipart/form-data',
+                success: function (data, status, xhr) {
+                    if (xhr.status === 202) {
+                        var trackerId = xhr.getResponseHeader('Progress-Tracker-Job-Id');
+                        self.trackProgress(trackerId, function (percentage, description) {
+                            progressTracker.progress = percentage;
+                        }).then(resolve).catch(reject);
+                    } else if (xhr.status === 200) {
+                        resolve(data);
+                    } else {
+                        reject(status);
+                    }
+                },
+                error: reject,
+                xhr: function () {
+                    var request = jQuery.ajaxSettings.xhr();
+                    if (request.upload) {
+                        request.upload.addEventListener('progress', function (event) {
+                            if (progressTracker && event.lengthComputable) {
+                                var max = event.total;
+                                var current = event.loaded;
+                                progressTracker.progress = (Math.round((current / max) * 100));
+                            }
+                        }, false);
+                    }
+                    return request;
+                }
+            });
+        });
+    };
+
+    RestClient.prototype.ajaxPromise = function (type, url, data) {
+        var self = this;
+        return new Promise(function (resolve, reject) {
+            var queryData = null;
+            if (type !== 'GET') {
+                queryData = JSON.stringify(data);
+            }
+
+            jQuery.ajax({
+                type: type,
+                url: self.baseUrl + url,
+                data: queryData,
+                contentType: 'application/json; charset=utf-8',
+                success: function (data, status, xhr) {
+                    if (xhr.status === 202) {
+                        resolve(xhr.getResponseHeader('Progress-Tracker-Job-Id'));
+                    } else {
+                        var contentDisposition = xhr.getResponseHeader('Content-Disposition');
+                        var contentType = xhr.getResponseHeader('Content-Type');
+                        if (contentDisposition) {
+                            resolve({
+                                "data": data,
+                                "contentDisposition": contentDisposition,
+                                "contentType": contentType
+                            });
+                        } else {
+                            resolve(data);
+                        }
+                    }
+                },
+                error: reject
+            });
+        });
+    };
+
+    RestClient.prototype.GET = function (url, data) {
+        if (data) {
+            var query = "?";
+            query += Object.entries(data)
+            .filter(function(pair) { return pair[1] !== undefined; })
+            .map(function(pair) {
+                if (Array.isArray(pair[1])) {
+                    return pair[1]
+                    .filter(function(value) { return value !== undefined; })
+                    .map(function(value) {
+                        return encodeURIComponent(pair[0]) + "=" + encodeURIComponent(value);
+                    }).join("&")
+                }
+                return encodeURIComponent(pair[0]) + "=" + encodeURIComponent(pair[1]);
+            }).join("&");
+            url += query;
+        }
+        return this.ajaxPromise('GET', url, null);
+  };
+
+  RestClient.prototype.POST = function (url, data) {
+    return this.ajaxPromise('POST', url, data);
+  };
+
+  RestClient.prototype.DELETE = function (url, data) {
+    return this.ajaxPromise('DELETE', url, data);
+  };
+
+  return RestClient;
 });
 
 define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/task', ['./utils', './material', './dialog', './adaptivity', './bigimage'], function (utils, material, dialogs, adaptivity, bigimage) {
@@ -3952,6042 +9957,6 @@ define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/task', ['./utils', './materi
 
 });
 
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/search', ['./utils', './material'], function(utils, material) {
-	
-	/**Contains functions for searching materials and notes. To use this API, load it like this:
-	 
-	 <pre><code>
-	require(['fi.cloubi.frontend/search'], function(search) {
-		search.searchMaterial(function(response) {
-			console.log(response);
-		});
-	});
-	 </code></pre>
-	 
-	 * @namespace search */
-	
-	/**Represents a single search result
-	 * @memberof search
-	 * @typedef {object} Result
-	 * @property {string} material						The ID of the material containing the result, in requested material format
-	 * @property {string} page							The ID of the material page containing the result
-	 * @property {string} [relatedContent]				The ID of the related content file containing the result
-	 * @property {object} highlights					An array containing the matching fields with the matching terms highlighted 
-	 * 													with <code>&lt;span class="term"&gt;match&lt;/span&gt;</code>
-	 * @property {string} highlights.title				An HTML fragment containing the title with highlights
-	 * @property {string} highlights.contents			An HTML fragment containing the contents with highlights
-	 * @property {string} highlights.description		An HTML fragment containing the description with highlights
-	 * @property {string} highlights.notes				An HTML fragment containing a note with highlights
-	 * @property {string} [time]						A human-readable timestamp to display with the result
-	 * @property {object} tags							An object mapping page tags to booleans indicating whether the tag matches the query or not
-	 * @property {search.BreadcrumbItem[]} breadcrumb	The breadcrumb of this page
-	 * @property {boolean} bookmarked					True if this page is bookmarked, false otherwise
-	 * @property {string} materialTitle					The title of the material containing this page
-	 * @property {string} url							An URL that can be used to open this page*/
-	
-	/**Represents an item in a page breadcrumb
-	 * @memberof search
-	 * @typedef {object} BreadcrumbItem
-	 * @property {string} page	The page ID of this breadcrumb item
-	 * @property {string} title	The title of this breadcrumb item*/
-	
-	/**Represents errors that can occur while using this API
-	 * Possible values:
-	 * <ul>
-	 * <li><b>empty-query</b>: No search terms provided</li>
-	 * <li><b>invalid-material</b>: The material specified does not exist or is inaccessible</li>
-	 * </ul>
-	 * @memberof search
-	 * @typedef {string} Error*/
-	
-	/**Represents different fields that can be searched
-	 * Possible values:
-	 * <ul>
-	 * <li><b>title</b>: Page title</li>
-	 * <li><b>contents</b>: Page content</li>
-	 * <li><b>description</b>: Page description</li>
-	 * <li><b>notes</b>: The user's notes on the page</li>
-	 * <li><b>tags</b>: Page tags</li>
-	 * </ul>
-	 * @memberof search
-	 * @typedef {string} Filter*/
-	
-	/**A callback for search results
-	 * @memberof search
-	 * @callback ResultsCallback
-	 * @param {object} response						The server response object
-	 * @param {search.Result[]} [response.results]	The search results
-	 * @param {search.Error[]} response.errors		Contains any errors encountered during the search*/
-	
-	/**A callback for an array of filters
-	 * @memberof search
-	 * @callback FiltersCallback
-	 * @param {search.Filter[]} filters		The filter list*/
-	
-	/**Server endpoint base URL*/
-	var ENDPOINT = "/o/search/";
-	
-	/**Material ID parameter name*/
-	var PARAM_MATERIAL = "material";
-	/**Search query parameter name*/
-	var PARAM_QUERY = "query";
-	/**Filter array parameter name*/
-	var PARAM_FILTERS = "filters";
-	
-	/**Currently enabled filters*/
-	var enabledFilters = null;
-	
-	/**Searches a material
-	 * @memberof search
-	 * @param {string} query							The search query
-	 * @param {search.ResultsCallback} [callback]		The callback for the results
-	 * @param {search.Filter[]} [filters]				A list of filters determining which fields to search. 
-	 * 													If empty or null, all enabled fields will be searched.
-	 * @param {number} [materialId=Current material ID]	The ID of the material to search in*/
-	function searchMaterial(query, callback, filters, materialId){
-		materialId = materialId || material.getCurrentMaterialId();
-		var data = {}
-		data[PARAM_QUERY] = query;
-		data[PARAM_FILTERS] = filters;
-		data[PARAM_MATERIAL] = materialId;
-		utils.post(ENDPOINT + "search-material", data, callback);
-	}
-	
-	/**Searches all materials
-	 * @memberof search
-	 * @param {string} query							The search query
-	 * @param {search.ResultsCallback} [callback]		The callback for the results
-	 * @param {search.Filter[]} [filters]				A list of filters determining which fields to search. 
-	 * 													If empty or null, all enabled fields will be searched.*/
-	function searchAll(query, callback, filters){
-		var data = {}
-		data[PARAM_QUERY] = query;
-		data[PARAM_FILTERS] = filters;
-		utils.post(ENDPOINT + "search-all", data, callback);
-	}
-	
-	/**Reindexes a material. This is intended to be used by editors who need to manually update the search index to reflect the current
-	 * state of the material and therefore works only if the user has edit rights to the material.
-	 * @memberof search
-	 * @param {function} [callback]						A callback that is invoked after the reindexing has been requested. 
-	 * 													Receives a single boolean parameter indicating whether the reindexing was started.
-	 * @param {number} [materialId=Current material ID]	The ID of the material to reindex*/
-	function reindex(callback, materialId){
-		materialId = materialId || material.getCurrentMaterialId();
-		var data = {}
-		data[PARAM_MATERIAL] = materialId;
-		utils.post(ENDPOINT + "reindex", data, function(){callback(true)}, function(){callback(false)});
-	}
-	
-	/**Gets the list of currently available search filters
-	 * @memberof search
-	 * @param {search.FiltersCallback} callback	A callback to receive the list of enabled filters*/
-	function getEnabledFilters(callback){
-		if (enabledFilters == null){
-			utils.get(ENDPOINT + "enabled-filters", function(res){
-				enabledFilters = res[PARAM_FILTERS];
-				callback(enabledFilters);
-			});
-		}
-		else {
-			callback(enabledFilters);
-		}
-	}
-	
-	return {
-		searchMaterial: searchMaterial,
-		searchAll: searchAll,
-		reindex: reindex,
-		getEnabledFilters: getEnabledFilters
-	}
-});
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/user-accounts', ['./utils'], function(utils) {
-
-	/**
-	 Contains functions for creating new user accounts, logging in, logging out and updating current user's details.
-	 <br><br>
-	 These function are intended to be used within the materials. For example, students could first start using a material 
-	 anonymously, i.e. without logging in, and then at later time register a new Cloubi user account so he/she can continue later.
-	 <br><br>
-	 
-	 To use this API, load it like this:
-	 
-	 <pre><code>
-require(['fi.cloubi.frontend/account'], function(accounts) {
-	accounts.getUserInfo(function(info) {
-		console.log(info);
-	});
-});
-	 </code></pre>
-	 
-	 * @namespace accounts */
-	
-	/**A callback for functions that will produce an UserInfo object.
-	 * @memberof accounts
-	 * @callback userInfoCallback
-	 * @param {?accounts.UserInfo} info		Information about current account or null if user is not logged in.*/
-	
-	/**A callback that will receive information about login attempt.
-	 * @memberof accounts
-	 * @callback loginCallback
-	 * @param {boolean} success					True, if the login attempt was successful. False, if user account does not exists or password is invalid.
-	 * 											For security reasons, missing account and wrong password produce the same error.
-	 */
-	
-	/**A callback that will be called after user has logged out.
-	 * @memberof accounts
-	 * @callback logoutCallback*/
-	
-	/**A callback that will receive information about user account update attempt.
-	 * @memberof accounts
-	 * @callback updateUserCallback
-	 * @param {boolean} success					True, if the login attempt was successful.
-	 * @param {Array.<string>} errors			If <code>success</code> is false, this array contains one or more of the following
-	  											error conditions: 'invalid-email', 'duplicate-email', 'first-name-empty', 'last-name-empty',
-	 											'invalid-password', 'passwords-do-not-match', 'too-short-password', 'too-trivial-password',
-	 											'edit-accounts-not-enabled', 'duplicate-username'.
-	 */
-	
-	/**A callback that will receive information about user account creation.
-	 * @memberof accounts
-	 * @callback registerUserCallback
-	 * @param {boolean} success					True, if the new user account was successfully created and user logged in. If false, possible
-	 											current user was not logged out.
-	 * @param {Array.<string>} errors			If <code>success</code> is false, this array contains one or more of the following
-	  											error conditions: 'invalid-email', 'duplicate-email', 'first-name-empty', 'last-name-empty',
-	 											'passwords-do-not-match', 'too-short-password', 'too-trivial-password', 'signup-not-enabled',
-	 											'duplicate-username'.
-	 */
-	
-	/**A callback that will called after a password reset link has been sent.
-	 * @memberof accounts
-	 * @callback resetLinkCallback
-	 */
-	
-	
-	
-	
-	/**An object representing the user account for logged in user. Some attributes are only used when updating the user account,
-	 * like password and newPassword. Some attributes cannot be updated, like the id. It depends on the server's configuration
-	 * wheter or not the email address can be changed.
-	 * @memberof accounts
-	 * @typedef {Object} UserInfo
-	 * @property {?string} id					The user ID.
-	 * @property {?string} firstName			First name of the user.
-	 * @property {?string} lastName				Last name of the user.
-	 * @property {?string} username				The username of the user.
-	 * @property {?string} email				Email address of the user.
-	 * @property {?string} password				User's current password.
-	 * @property {?string} newPassword			New password for the user.
-	 * @property {?string} newPasswordAgain		New password again.
-	 */
-	
-	
-	/**An object representing the global configuration of user accounts, such as wheter is possible to create new accounts or not.
-	 * @memberof accounts
-	 * @typedef {Object} Configuration
-	 * @property {boolean} signup				True, if its possible to create new accounts.
-	 * @property {boolean} editAccounts			True, if its possible to edit existing accounts.
-	 * @property {boolean} emailLogin			True, if login should be done with email address instead of username.
-	 */
-	
-	
-	
-	// This variable is used to hold transient information about user's state (logged in or not)
-	// after logIn, logOut or registerUser has been called. Before calling those functions,
-	// this variable must be null.
-	var loggedInState = null;
-	
-	
-	
-	/**Gets the current global configuration for user accounts.
-	 * @memberof accounts
-	 * @return {accounts.Configuration} The configuration.*/
-	function getConfiguration() {
-		return {
-			signup: Cloubi.userAccountConfig.signup,
-			editAccounts: Cloubi.userAccountConfig.editAccounts,
-			emailLogin: Cloubi.userAccountConfig.emailLogin
-		};
-	}
-	
-	
-	/**Gets information about currently logged in user, if there is one. 
-	 * @memberof accounts
-	 * @param {accounts.userInfoCallback} callback		A callback function that receives the user account info.*/
-	function getUserInfo(callback) {
-		if ( loggedInState ) {
-			callback(loggedInState.user);
-		} else {
-			if ( themeDisplay.isSignedIn() ) {
-				callback({
-					id: Cloubi.currentUser.userId,
-					firstName: Cloubi.currentUser.firstName,
-					lastName: Cloubi.currentUser.lastName,
-					email: Cloubi.currentUser.email,
-					username: Cloubi.currentUser.screenName,
-				});
-			} else {
-				callback(null);
-			}
-		}
-	}
-	
-	/**Checks if there is a logged in user. 
-	 * If there is, then the <code>getUserInfo()</code> function will provide a non-null UserInfo object. 
-	 * @memberof accounts
-	 * @return {boolean} True, if there is a logged in user.*/
-	function isLoggedIn() {
-		if ( loggedInState ) {
-			return loggedInState.loggedIn;
-		} else {
-			return themeDisplay.isSignedIn();
-		}
-	}
-	
-	/**Logins user with provided email address/username and password. If the user is already logged in with another user account,
-	 * then he/she will be first logged out. If the user has already logged in with this account, then this function does nothing.
-	 * Only email address or username can be used, depending on the configuration. See <code>getConfiguration</code>.
-	 * A callback will be called after the user has either successfully logged in or there is an error, like incorrect password.
-	 * It is highly recommended to reload the page after successful login, as rest of the page will be in invalid state.
-	 * @memberof accounts
-	 * @param email {string}						The email address of the user, or null if not used.
-	 * @param username {string}						The username of the user, or null if not used. 
-	 * @param password {string}						The password of the user.
-	 * @param callback {accounts.loginCallback}		A callback function for when the login attempt is completed.
-	 */
-	function logIn(email, username, password, callback) {
-		var loginData = null;
-		if ( getConfiguration().emailLogin ) {
-			if ( email ) {
-				loginData = { email: email, password: password };
-			}
-		} else {
-			if ( username ) {
-				loginData = { username: username, password: password };
-			}
-		}
-		if ( loginData ) {
-			utils.post('/o/user-accounts/sign-in', loginData, function(data) {
-				if (data.success) {
-					loggedInState = { loggedIn: true, user: data.user };
-				}
-				callback(data.success);
-			});
-		} else {
-			callback(false);
-		}
-	}
-	
-	/**Logs out current user. 
-	 * @memberof accounts
-	 * @param callback {accounts.logoutCallback}	A callback function for when the user has logged out. If the user has already logged out, this
-	 												will be called immediately.
-	   @param stayOnPage {boolean}					If true, the browser will stay on the current page and the callback will be triggered after the user has been logged out. 
-	   												Otherwise it will be immediately redirected to the default logout location*/
-	function logOut(callback, stayOnPage) {
-		if ( themeDisplay.isSignedIn() ) {
-			if (stayOnPage) {
-				utils.getHtml('/c/portal/logout', function() {
-					loggedInState = { loggedIn: false, user: null };
-					callback();
-				});
-			}
-			else {
-				window.open('/c/portal/logout', '_self');
-			}
-		} else {
-			callback();
-		}
-	}
-	
-	/**Updates current user's account, like changes the first name or password. 
-	 * @memberof accounts
-	 * @param info {accounts.UserInfo}					The settings to change. Only include the attributes you wish to update. To change the password, you
-	  													must include password, newPassword and newPasswordAgain. Must not contain id attribute.
-	 * @param callback {accounts.updateUserCallback}	A callback function for when the update is completed.
-	 */
-	function updateUser(info, callback) {
-		utils.post('/o/user-accounts/update-account', info, function(data) {
-			callback(data.success, data.errors);
-		});
-	}
-	
-	/**Creates new user's account, and if successful, logins that new user. It is highly recommended to reload the page after successful 
-	 * login, as rest of the page will be in invalid state.
-	 * @memberof accounts
-	 * @param info {accounts.UserInfo}					Settings for the new user account. Must not contain id or password attributes. 
-	 													Must contain newPassword, newPasswordAgain, firstName, and lastName attributes.
-	 													If login by email is enabled, must contains email attribute, otherwise must contain
-	 										 			username attribute.
-	 * @param callback {accounts.registerUserCallback}	A callback function for when the registration is completed.*/
-	function registerUser(info, callback) {
-		utils.post('/o/user-accounts/create-account', info, function(data) {
-			if (data.success) {
-				loggedInState = { loggedIn: true, user: data.user };
-			}
-			callback(data.success, data.errors);
-		});
-	}
-	
-	
-	/**Requests a password reset link to be sent to given email address.
-	 * @memberof accounts
-	 * @param email {string}							The email address to send the reset link. 
-	 * @param callback {accounts.resetLinkCallback}		A callback function for when the link has been sent.*/
-	function passwordRecovery(email, callback) {
-		utils.post('/o/user-accounts/password-recovery', {
-			email: email, lang: Cloubi.currentUser.languageId
-		}, function(data) {
-			callback();
-		});
-	} 
-	
-	
-	return {
-		getConfiguration: getConfiguration,
-		getUserInfo: getUserInfo,
-		isLoggedIn: isLoggedIn,
-		logIn: logIn,
-		logOut: logOut,
-		updateUser: updateUser,
-		registerUser: registerUser,
-		passwordRecovery: passwordRecovery
-	};
-
-});
-
-
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/material', ['./utils'], function(utils) {
-
-	//IE polyfills
-	if (!Array.prototype.includes){
-		Array.prototype.includes = function(value){
-			for (var i = 0; i < this.length; i++) {
-				if (this[i] === value) return true;
-			}
-			return false;
-		}
-	}
-
-	/**Contains functions for accessing & manipulating the currently open material & material page
-	 * @namespace material*/
-
-	/**A callback for functions that output arbitrary data
-	 * @memberof material
-	 * @callback anyCallback
-	 * @param {any} value	The requested value*/
-
-	/**A callback for functions that output integer data
-	 * @memberof material
-	 * @callback intCallback
-	 * @param {int} value	The requested value*/
-
-	/**A callback for functions that output page data
-	 * @memberof material
-	 * @callback pageCallback
-	 * @param {?material.Page} page	The requested page or null if the page is not available*/
-	
-	/**A callback for that listens for page updates
-	 * @memberof material
-	 * @callback pageUpdateCallback
-	 * @param {material.Page} page	The requested page or null if the page is not available
-	 * @param {string[]} [fields]	A list containing the names of fields that were updated*/
-
-	/**A callback for functions that output material data
-	 * @memberof material
-	 * @callback materialCallback
-	 * @param {material.Material} material	The requested material*/
-
-	/**A callback for functions that output extra page data
-	 * @memberof material
-	 * @callback extraPageCallback
-	 * @param {material.ExtraPage} page	The extra page*/
-
-	/**A callback for functions that output a list of pages
-	 * @memberof material
-	 * @callback pageListCallback
-	 * @param {material.Page[]} pages		The requested pages
-	 * @param {boolean} [containsCurrent]	If present, indicates whether or not the list contains the currently open page*/
-
-	/**A callback for functions that output a list of permissions
-	 * @memberof material
-	 * @callback permissionListCallback
-	 * @param {material.Permission[]} permissions	The requested permissions*/
-	
-	/**A callback for function that outputs a list of material's ISBNs
-	 * @memberof material
-	 * @callback materialISBNsCallback 
-	 * @param {material.Material.isbns} materialISBNs	requested list of material's ISBNs*/
-
-	/**A callback that is invoked when the current material has been resolved
-	 * @memberof material
-	 * @callback materialReadyListener*/
-
-	/**A callback that is invoked whenever the displayed page is changed
-	 * @memberof material
-	 * @callback pageChangeListener
-	 * @param {material.Page} page					The new page
-	 * @param {material.PageChangeOptions} options	The page change options
-	 * @param {Object} data							Arbitrary metadata passed with the original page change request*/
-
-	/**A callback that is invoked before the displayed page is changed
-	 * @memberof material
-	 * @callback beforePageChangeListener
-	 * @param {material.Page} page					The new page
-	 * @param {material.PageChangeOptions} options	The page change options object
-	 * @return {Promise}							A promise that should be resolved when the new page can safely be loaded*/
-
-	/**A callback for functions that output a playlist
-	 * @memberof material
-	 * @callback playlistCallback
-	 * @param {?material.Playlist} playlist	The requested playlist or null if the playlist is not available*/
-	
-	/**A callback for functions that output metadata
-	 * @memberof material
-	 * @callback metadataCallback
-	 * @param {material.Metadata} metadata			The requested metadata or null if material is not available*/
-
-	/**A function that is used to redirect the user from certain pages to others
-	 * @memberof material
-	 * @typedef {function} pageMapper
-	 * @param {string} pageID	The ID of the page to redirect from
-	 * @return {string}	The ID of the page to redirect to*/
-
-	/**The loading status for an individual product page
-	 * @ignore
-	 * @typedef {Object} LoadingStatus
-	 * @property {boolean} failed					true if loading this page failed, false otherwise
-	 * @property {material.pageCallback[]} buffer	An array of callbacks to invoke when loading finishes*/
-
-	/**An object that globally identifies a specific product page
-	 * @memberof material
-	 * @typedef {Object} PageID
-	 * @property {string} materialId	The ID of the product containing the page
-	 * @property {string} pageId		The ID of the page within the product
-	 * @property {Object} data			Data to pass to listeners when the page is loaded*/
-
-	/**An object specifying extra options for a page change operation
-	 * @memberof material
-	 * @typedef {Object} PageChangeOptions
-	 * @property {boolean} [addPageToHistory=true]		If true, the page state will be added to browser history
-	 * @property {boolean} [ignorePageMappers=false]	If true, the page ID should be processed raw, ignoring any active page mapper function
-	 * @property {boolean} [loadContent=true]			If true, the page content will be loaded into the browser in place of the previously displayed page
-	 * @property {boolean} [back=false]					If true and the specified page is hidden, its closest visible ancestor page will be loaded instead.
-	 * 													Otherwise, if the page is hidden, its first child will be loaded*/
-
-	/**An object representing a product page
-	 * @memberof material
-	 * @typedef {Object} Page
-	 * @property {string} title					The title of the page
-	 * @property {string} shortTitle			The short title of the page
-	 * @property {string} desc					The description of the page
-	 * @property {string} id					The ID of this page
-	 * @property {string} identifier			The identifier of this page
-	 * @property {string} url					The complete URL of this page
-	 * @property {string} contentUrl			The URL to load this page's content only
-	 * @property {int} level					The page's level in the page hierarchy
-	 * @property {string[]} breadcrump			The page's breadcrumb in the page hierarchy as an ordered list of page IDs
-	 * @property {string} colorHex				The color hex of the page
-	 * @property {string} group					The group of this page
-	 * @property {string} [imageUrl]			The url for the page image of this page
-	 * @property {boolean} navigation			True if this page is a navigation page
-	 * @property {int} pageIndex				The page index of the page
-	 * @property {int} pageNumber				The page number of the page
-	 * @property {string} contentType			The content type of the page
-	 * @property {string} subContentType		The content subtype of the page
-	 * @property {boolean} hidden				True if the page is hidden
-	 * @property {boolean} hideFromChildren		True if the page is hidden from its children
-	 * @property {boolean} hideFromNavigation	True if the page is hidden from navigation
-	 * @property {boolean} inactive				True if the page is inactive
-	 * @property {string[]} childPages			An array of the IDs of the page's child pages
-	 * @property {string[]} tags				An array of the page's tags
-	 * @property {string[]} contentTags			An array of the page's content tags
-	 * @property {string[]} styleClasses		An array of the page's style classes
-	 * @property {int} siblingId				The sibling ID of the page
-	 * @property {int} currentChildId			The current child ID of the page
-	 * @property {material.LockState} lockState	The lock state of the page.
-	 * @property {material.LockReason[]} lockReasons	If the page is locked, contains reasons explaining why
-	 * @property {Object} scores				The user's current scores on this page
-	 * @property {int} scores.score			The current user score on this page
-	 * @property {int} scores.scoreMax		The maximum score on this page
-	 * @property {float} scores.progress	The user's progress through this page on a scale of 0 to 1
-	 * @property {boolean} scores.visited	True if the user has visited this page, false otherwise
-	 * @property {int} scores.stars			The current number of stars the user has on this page
-	 * @property {int} scores.starsMax		The maximum number of stars on this page */
-
-	/**An object representing a single product
-	 * @memberof material
-	 * @typedef {Object} Material
-	 * @property {string} title					The title of the product
-	 * @property {string} id					The ID of the product
-	 * @property {string} languageId			The language info of the product
-	 * @property {string[]} isbns				An array of the product's ISBNs
-	 * @property {string} lastUpdated 			The time when the material was last edited*/
-	
-	/**Represents a page outside the normal material structure
-	 * @memberof material
-	 * @typedef {Object} ExtraPage
-	 * @property {string} pageUrl			The URL to access the page directly
-	 * @property {string} pageContentUrl	The URL to access the page content only
-	 * @property {string} languageKey		The language key used to translate the page name*/
-	
-	/**A string indicating the lock state of a page.
-	 * Possible values are OPEN (allow access), 
-	 * PREVIOUSLY_LOCKED (this page has been locked at some point but is now open),
-	 * SHOW_IN_NAVIGATION_ONLY (no access but should be visible in navigation)
-	 * and LOCKED (no access, hide from navigation).
-	 * @memberof material
-	 * @typedef {String} LockState*/
-	
-	/**An object representing a reason that a page is locked
-	 * @memberof material
-	 * @typedef {Object} LockReason
-	 * @property {string} [name]					A human-readable title for the reason
-	 * @property {string} [description]				A human-readable description of the reason
-	 * @property {string} [imageUrl]				A URL that can be used to show an image representing the reason
-	 * @property {string} type						The type identifier of this reason
-	 * @property {material.LockReason[]} subreasons	An array of sub-reasons such as alternative unlock conditions*/
-	
-	/**An object representing a page's lock state and possible reasons that the page is locked
-	 * @memberof material
-	 * @typedef {Object} LockAndReason
-	 * @property {material.LockState} lockState			The lock state of the page.
-	 * @property {material.LockReason[]} lockReasons	An array of reasons explaining why the page is locked*/
-
-	/**An object representing a playlist
-	 * @memberof material
-	 * @typedef {Object} Playlist
-	 * @property {string} id						The ID of the playlist
-	 * @property {string} name						The name of the playlist
-	 * @property {string} description				The description of the playlist
-	 * @property {boolean} visible					If true, anyone with the code can open the playlist
-	 * @property {string} shareCode					The share code of the playlist
-	 * @property {long} creator						The user ID of the creator of the playlist
-	 * @property {material.PlaylistPage[]} pages	An array of pages in the list*/
-	
-	/**An object representing metadata of a material
-	 * @memberof material
-	 * @typedef {Object} Metadata
-	 * @property {string} previewURL				The preview URL of the material
-	 * @property {string} schoolSubject				The school subject of the material
-	 * @property {string} isbn						The isbn code of the material
-	 * @property {string} description				The description of the material
-	 * @property {string} title						The title of the material
-	 * @property {string} type						The type of the material
-	 * @property {string} locale					The locale of the material
-	 * @property {string} classLevel				The classLevel of the material
-	 * @property {Object[]} materialTypeMetadata	An array of arbitrary metadata
-	 * @property {string} basenumber				The base number of the material
-
-	/**A single page in a playlist
-	 * @memberof material
-	 * @typedef {Object} PlaylistPage
-	 * @property {string} materialId			The material ID of this playlist page
-	 * @property {string} pageId				The page ID of this playlist page
-	 * @property {string} [relatedContentId]	The related content ID of this playlist page*/
-
-	/**A source for pageIds to use with the {@link changeToNextPage} and {@link changeToPreviousPage} functions
-	 * @memberof material
-	 * @typedef {Object} PageSource
-	 * @property {material.pageIDProvider} getNextPageId		Gets the ID of the next page
-	 * @property {material.pageIDProvider} getPreviousPageId	Gets the ID of the previous page*/
-
-	/**A function that provides a page ID
-	 * @memberof material
-	 * @typedef {Function} pageIDProvider
-	 * @param {material.pageCallback} callback	A function to receive the ID*/
-
-	/**A function that determines achievements based on page data
-	 * @memberof material
-	 * @typedef {Function} AchievementCalculator
-	 * @param {material.Page} page	The page data
-	 * @return {Object}	The achievement data*/
-
-	/**A function that renders pages of given content type.
-	 * @memberof material
-	 * @typedef {Function} PageContentTypeRenderer
-	 * @param {material.Page} page	The page data to render
-	 * @param {string} containerId  The id of the DOM element to render the page into.
-	 * @param {Function} callback  Function to call when page has been rendered.*/
-
-	/**Indicates permissions that a user has to a material. Possible values;
-	 * <ul>
-	 * <li><b>DELETE</b>: The user can delete the material</li>
-	 * <li><b>DUPLICATE</b>: The user can duplicate the material</li>
-	 * <li><b>EDIT</b>: The user can edit the material</li>
-	 * <li><b>PARTICIPATE</b>: The user can view the material</li>
-	 * <li><b>PUBLISH</b>: The user can publish the material</li>
-	 * <li><b>SHARE</b>: The user can share the material</li>
-	 * <li><b>REPORT</b>: The user can view reports in the material</li>
-	 * @memberof material
-	 * @typedef {string} Permission*/
-
-
-	var loadedPages = {};
-	var pageLoadingInProgress = false;
-	var loadedPageCallbackBuffer = {};
-	var gamification = {};
-	var performanceHints = {
-			skipLoadingScores: false
-	};
-
-	var extraPageChangeListeners = [];
-
-	var currentPageId = null;
-	var lastPageId = null;
-	var pageMappers = {};
-	var pageChangeListeners = [];
-	var pageStartsLoadingListeners = [];
-	var pageUpdatedListeners = [];
-	var renderers = {};
-	var pageCustomDatas = {};
-	var ajaxLoadEnabled = true;
-	var fontSize = 0;
-	var fontSizeListeners = [];
-	var materialReadyListeners = [];
-	var pageContentTypeRenderers = {};
-
-	/**The ID of the material containing the current page*/
-	var currentMaterialId = null;
-	/**The content type of the material containing the current page*/
-	var currentMaterialContentType = null;
-	/**@deprecated call getPage with an object containing the materialId instead.
-	 * If not null, overrides the requestedMaterial from getRequestedMaterial*/
-	var currentRequestedMaterial = null;
-	/**An array of listener functions called whenever the current playlist changes*/
-	var playlistChangeListeners = [];
-	/**The currently active playlist, if any*/
-	var currentPlaylist = null;
-
-	/**The object currently used to get the next and previous pages*/
-	var currentPageSource = new DefaultPageSource();
-
-	/**An array of permissions that the user has for the current material*/
-	var materialPermissions = null;
-
-	/**An object of metadata for the current material */
-	var metadata = null;
-
-	/**Creates an object that traverses through the current material*/
-	function DefaultPageSource(){};
-	//Gets the next page in the material
-	DefaultPageSource.prototype.getNextPageId = function(callback){
-
-		getCurrentPage( function( currentPage ){
-
-			if ( currentPage != null ) {
-
-				getPageLevelPages( currentPage.id, function( pages ){
-					var pageIndex = getPageIndex(currentPage, pages);
-					console.log(pages, pageIndex)
-					while ( pageIndex < pages.length - 1 ){
-						pageIndex++;
-						var possible = pages[pageIndex];
-						if (!possible.inactive && possible.lockState !== 'LOCKED' && possible.lockState !== 'SHOW_IN_NAVIGATION_ONLY'){
-							callback(possible.id);
-							return;
-						}
-					}
-					callback(null);
-
-				});
-
-			}
-
-		});
-	}
-	//Gets the previous page in the material
-	DefaultPageSource.prototype.getPreviousPageId = function(callback){
-		getCurrentPage( function( currentPage ){
-
-			if ( currentPage != null ) {
-
-				getPageLevelPages( currentPage.id, function( pages ){
-					var pageIndex = getPageIndex(currentPage, pages);
-					while ( pageIndex > 0 ){
-						pageIndex--;
-						var possible = pages[pageIndex];
-						if (!possible.inactive && possible.lockState !== 'LOCKED' && possible.lockState !== 'SHOW_IN_NAVIGATION_ONLY'){
-							callback(possible.id);
-							return;
-						}
-					}
-					callback(null);
-
-				});
-
-			}
-
-		});
-	}
-	/**Creates an object that traverses through pages from the current playlist*/
-	function PlaylistPageSource(){
-		//Initialize page index to -1 so that the first call to getNextPageId()
-		//returns the ID of the first page
-		this.pageIndex = -1;
-	}
-	//Gets the ID of the next playlist page
-	PlaylistPageSource.prototype.getNextPageId = function (callback){
-		//Stop if we've reached the end of the playlist
-		if (this.pageIndex >= currentPlaylist.pages.length -1){
-			callback(null);
-		}
-		else {
-			//Find the next page
-			var nextPage = currentPlaylist.pages[this.pageIndex +1];
-			//Increment current page index
-			this.pageIndex++;
-
-			//Format page data
-			var pageData = {
-					materialId: nextPage.materialId,
-					pageId: nextPage.pageId,
-					urlParams: {
-						openPlaylist: currentPlaylist.id,
-						playlistPage: this.pageIndex
-					},
-					numericMaterialId: nextPage.numericMaterialId
-			}
-			//Include any related content data
-			if (nextPage.relatedContentId){
-				pageData.data = {
-						relatedContentId: nextPage.relatedContentId,
-						relatedContentShowInline: true,
-						playlistId : currentPlaylist.id
-				}
-				pageData.urlParams.relcontent = nextPage.relatedContentId
-			}
-
-			//Send back an object containing the material and page IDs of the next page
-			callback(pageData);
-		}
-	}
-	//Gets the ID of the previous playlist page
-	PlaylistPageSource.prototype.getPreviousPageId = function (callback){
-		//Stop if we've reached the beginning of the playlist
-		if (this.pageIndex <= 0){
-			callback(null);
-		}
-		else {
-			//Find the previous page
-			var prevPage = currentPlaylist.pages[this.pageIndex -1];
-			//Decrement current page index
-			this.pageIndex--;
-
-			//Format page data
-			var pageData = {
-					materialId: prevPage.materialId,
-					pageId: prevPage.pageId,
-					urlParams: {
-						openPlaylist: currentPlaylist.id,
-						playlistPage: this.pageIndex
-					},
-					numericMaterialId: prevPage.numericMaterialId
-			}
-			//Include any related content data
-			if (prevPage.relatedContentId){
-				pageData.data = {
-						relatedContentId: prevPage.relatedContentId,
-						relatedContentShowInline: true,
-						playlistId : currentPlaylist.id
-				}
-				pageData.urlParams.relcontent = prevPage.relatedContentId
-			}
-
-			//Send back an object containing the material and page IDs of the previous page
-			callback(pageData);
-		}
-	}
-
-	PlaylistPageSource.prototype.setCurrentPageIndex = function(index){
-		this.pageIndex = index;
-	}
-
-	PlaylistPageSource.prototype.getCurrentPageIndex = function(){
-		return this.pageIndex;
-	}
-
-	var _achievementCalculator = function(page) {
-
-		var achievement = {
-			elements: 0,
-			elementsMax: 0
-		};
-
-		if ( page.scores ) {
-
-			var scores = page.scores;
-
-			if ( scores.scoreMax > 0 ) {
-
-				achievement.elementsMax = 3;
-
-				var percentage = (scores.score / scores.scoreMax) * 100;
-
-				achievement.elements = percentage == 0 ? 0 : percentage <= 34 ? 1 : percentage <=67 ? 2 : 3;
-
-			} else {
-
-				achievement.elementsMax = 1;
-
-				// is visited
-				if ( scores.visited ) {
-					achievement.elements = 1;
-				}
-
-			}
-
-		}
-
-		return achievement;
-
-	};
-
-	/**Gets the requested material string of the current page.
-	 * The requested material string encodes both the material ID as well as the view mode.
-	 * @memberof material
-	 * @return {?string}	The requested material string, if available*/
-	function getRequestedMaterial() {
-		//Use an override material if one has been set
-		if (currentRequestedMaterial){
-			return currentRequestedMaterial;
-		}
-		//Otherwise get the material from the URL
-		var requestedMaterial = utils.getUrlParameter("material");
-
-		if ( requestedMaterial ) {
-			return requestedMaterial;
-		} else {
-			var start = location.pathname.indexOf("/state-");
-			if ( start != -1 ) {
-				var end = location.pathname.indexOf("/", start+1);
-				return location.pathname.substring(start+7, end);
-			}
-		}
-
-		return null;
-
-	}
-
-	/**Gets the page loading status for a page if and only if it exists.
-	 * @param {string} materialId	The ID of the material containing the page
-	 * @param {string} pageId		The ID of the page
-	 * @return {material.LoadingStatus|undefined}	The loading status for the page or undefined if the status has not been set*/
-	function readLoadingStatus(materialId, pageId){
-		if (loadedPageCallbackBuffer[materialId]){
-			return loadedPageCallbackBuffer[materialId][pageId];
-		}
-		else {
-			return undefined;
-		}
-	}
-
-	/**Sets the page loading status for a page.
-	 * @param {string} materialId				The ID of the material containing the page
-	 * @param {string} pageId					The ID of the page
-	 * @param {material.LoadingStatus} status	The loading status to set for the page*/
-	function writeLoadingStatus(materialId, pageId, status){
-		//If the buffer has no entry for this material, create one
-		if (!loadedPageCallbackBuffer[materialId]){
-			loadedPageCallbackBuffer[materialId] = {};
-		}
-		//Add the status to the buffer
-		loadedPageCallbackBuffer[materialId][pageId] = status;
-	}
-
-	/**Gets the loading status for a material page
-	 * @param {string|material.PageID} page	Either the string ID of the page or a page data object identifying the material and the page
-	 * @return {material.LoadingStatus}	The loading status for the specified page*/
-	function getPageLoadingStatus(page) {
-		//Resolve page & material IDs
-		var pageId;
-		var materialId;
-
-		if (typeof(page) === "object"){
-			pageId = page.pageId;
-			materialId = page.materialId;
-		}
-		else {
-			pageId = page;
-			materialId = getRequestedMaterial();
-		}
-
-		//If no status exists, create an empty one
-		if ( !readLoadingStatus(materialId, pageId) ) {
-
-			writeLoadingStatus(materialId, pageId, {
-				failed: false,
-				buffer: []
-			});
-
-		}
-
-		return readLoadingStatus(materialId, pageId);
-
-	}
-
-	function loadPagesWithLevel(loadPagesByLevel, callback) {
-		if ( currentPageId ) {
-			loadPage(currentPageId, loadPagesByLevel, callback);
-		} else {
-			callback(null);
-		}
-	}
-
-	function loadPage(pageId, loadPagesByLevel, callback) {
-		//Get current loading status
-		var loadingStatus = getPageLoadingStatus(pageId);
-
-		//If we've already attempted to load the page and failed, return null
-		if ( loadingStatus.failed ) {
-			callback(null);
-			return;
-		}
-
-		//Otherwise add the callback to a buffer of functions to call when the page loads
-		loadingStatus.buffer.push(callback);
-
-		//If we're currently loading a page, wait for the load to finish
-		if ( pageLoadingInProgress ) {
-			return;
-		}
-
-		//Otherwise load the page immediately
-		doLoadPage(pageId, loadPagesByLevel);
-
-	}
-
-	function doLoadPage(page, loadPagesByLevel) {
-		var pageId;
-		var requestedMaterial;
-
-		if (typeof(page) === "object"){
-			pageId = page.pageId;
-			requestedMaterial = page.materialId;
-		}
-		else {
-			pageId = page;
-			requestedMaterial = getRequestedMaterial();
-		}
-	
-		pageLoadingInProgress = true;
-
-		/* If Analytics Framework is installed, pages-for-analytics endpoint is called. If the server is 
-		configured to not load scores, pages-for-analytics endpoint is also called, but without the Framework. */
-		var action = "pages-for-analytics";
-
-		/* If Analytics Framework is not installed and skipLoadingScores is false,
-		pages-with-scores endpoint will be called, if it so configured on the server. */
-		if (loadPageScores() && !performanceHints.skipLoadingScores) {
-			if (!isAnalyticsFrameworkInstalled()) {
-				action = "pages-with-scores";
-			}
-		/* If the theme wants to skip loading scores completely, pages endpoint is called. */
-		} else if (performanceHints.skipLoadingScores) {
-			action = "pages";
-		}
-
-		/* Fetch page scores with getTaskStatus() with the payload if Analytics Framework
-		is installed and if skipLoadingScores is false. */
-		var scores;
-		if(!performanceHints.skipLoadingScores) {
-			if (isAnalyticsFrameworkInstalled() && !doNotLoadFromAnalytics()) {
-				var payload = {
-					material: Cloubi.currentMaterial.uuid,
-					users: [Cloubi.currentUser.uuid]
-				}
-				scores = getTaskStatus(payload);
-			}
-		}
-
-		var url = "/o/site-material-api/" + action + "/" + encodeURIComponent(requestedMaterial) + "/" + encodeURIComponent(pageId);
-		if (loadPagesByLevel) {
-			url = url + "/" + encodeURIComponent(loadPagesByLevel);
-		}
-		
-		utils.get(url, function(data) {
-			/* If Analytics Framework is installed and scores are ready, 
-			then calculate the scores for each page using data from AF. */
-			if (typeof(scores) != "undefined" && !performanceHints.skipLoadingScores) {
-				scores.then(
-					function(taskStatus) {
-						for(var pageProperty in data.pages) {
-							var pageObject = data.pages[pageProperty];
-							var pageScores = taskStatus.filter(function(value) {
-								return value.pageId === pageObject.uuid;
-							});
-
-							// Ignore ATP-packages since their scores are not stored in analytics
-							if(pageScores && pageScores.length
-								&& pageObject.contentType !== 'cloubi/adaptivetaskpackage') {
-								computePageScores(pageObject.scores, pageScores);
-							}
-						}
-						loadPages();
-					},
-					function(error) {
-						console.log(error);
-					}
-				)
-			} else {
-				/* If Analytics Framework is not installed, or skipLoadingScores or
-				doNotLoadFromAnalytics are true, just load pages. */
-				loadPages();
-			}
-
-			function loadPages() {
-				pageLoadingInProgress = false;
-				if (!loadedPages[requestedMaterial]){
-					loadedPages[requestedMaterial] = {};
-				}
-	
-				var hasRequestedPage = false;
-				if ( data.pages ) {
-					var existing = 0;
-					var newPages = 0;
-					jQuery.each(data.pages, function(id, page) {
-						if ( id == pageId ) {
-							hasRequestedPage = true;
-						}
-						if ( loadedPages[requestedMaterial][id] ) {
-							existing++;
-						} else {
-							newPages++;
-							loadedPages[requestedMaterial][id] = page;
-						}
-					});
-				}
-	
-				//Store material info
-				if ( data.materialId ) {
-					loadedPages[requestedMaterial]._materialId = data.materialId;
-				}
-				if ( data.materialContentType ) {
-					loadedPages[requestedMaterial]._contentType = data.materialContentType;
-				}
-				if ( data.lastPageId ) {
-					lastPageId = data.lastPageId;
-				}
-				if (!hasRequestedPage){
-					// console.log("WARNING: Requested page " + pageId + " was not present in response");
-					if ( readLoadingStatus(requestedMaterial, pageId) ){
-						/* If the specific page requested was not in the response, mark loading
-						status as failed. Otherwise invokeBufferedPageLoads() may attempt
-						to load it again, causing an infinite loop. */
-						readLoadingStatus(requestedMaterial, pageId).failed = true;
-					}
-				}
-				invokeBufferedPageLoads();
-			}
-		});
-	}
-
-	/* Fetches page scores from task status microservice. */
-	function getTaskStatus(payload) {
-		return new Promise(function(resolve, reject) {
-			utils.post("/o/analytics-framework/progress-status", payload,
-				function(response) {
-					resolve(response);
-				},
-				function() {
-					reject("Error while fetching task scores");
-				}
-			);
-        });
-	}
-
-	/* Computes the sum of scores, progress and stars for each page from the tasks. */
-	function computePageScores(scores, taskStatus) {
-		var scoreSum = 0;
-		var progressSum = 0;
-		taskStatus.forEach(function(taskScore) {
-			scoreSum += taskScore.score;
-			progressSum += taskScore.progress;		
-		});
-		//If the page has any task data, assume that it is visited
-		//(this is strictly speaking not true because of linked tasks, but there's no way to check for sure
-		//without sacrificing performance yet).
-		if (taskStatus.length > 0) {
-		    scores.visited = true;
-		}
-		scores.score = scoreSum;
-		// Calculate progress
-		if (scores.tasks > 0) {
-		    //Analytics returns scores as percentages, so divide by 100 to get a value between 0-1
-			scores.progress = (progressSum / scores.tasks) / 100;
-		} else {
-			scores.progress = 0;
-		}
-		// Calculate stars
-		var percent;
-		if (scores.scoreMax > 0) {
-			percent = (scoreSum / scores.scoreMax);
-		} else {
-			percent = 0;
-		}
-		if ( percent < 0.01 ) {
-			scores.stars = 0;
-		} else if ( percent < 0.34 ) {
-			scores.stars = 1;
-		} else if ( percent < 0.67 ) {
-			scores.stars = 2;
-		} else {
-			scores.stars = 3;
-		}
-	}
-
-	/** Gets list of material's ISBNs as {@link MaterialISBNs} object
-	 * @memberof material
-	 * @param {material.materialISBNsCallback} callback		A callback to receive the data*/
-	function getMaterialISBNs(callback) {
-		if ( self.Cloubi && Cloubi.currentMaterial && Cloubi.currentMaterial.isbns ) {
-			callback(Cloubi.currentMaterial.isbns);
-		}
-		else {
-			callback([]);
-		}
-	}
-
-	/**Gets a page with specific material and page IDs if and only if the page is cached.
-	 * @param {string} requestedMaterial	The encoded material ID of the material containing the page
-	 * @param {string} pageId				The page ID of the page
-	 * @return {material.Page|undefined}	An object representing the page or undefined if no such page exists in the cache*/
-	function getCachedPage(requestedMaterial, pageId){
-		if (loadedPages[requestedMaterial]){
-			return loadedPages[requestedMaterial][pageId];
-		}
-		else {
-			return undefined;
-		}
-	}
-
-	function invokeBufferedPageLoads() {
-
-		var nextToLoad = null;
-		var callbacksToInvoke = [];
-
-		jQuery.each(loadedPageCallbackBuffer, function(requestedMaterial, pages) {
-			jQuery.each(pages, function(pageId, status) {
-				var buffer = status.buffer;
-				if ( buffer.length > 0 ) {
-					var cachedPage = getCachedPage(requestedMaterial, pageId);
-					if ( status.failed || cachedPage ) {
-						status.buffer = [];
-						var page = null;
-						if ( cachedPage ) {
-							page = cachedPage;
-						}
-						jQuery.each(buffer, function(index, callback) {
-							callbacksToInvoke.push({callback: callback, page: page});
-						});
-					} else {
-						nextToLoad = {pageId: pageId, materialId: requestedMaterial};
-					}
-				}
-			});
-		});
-
-		jQuery.each(callbacksToInvoke, function(index, what) {
-			what.callback(what.page);
-		});
-
-		if ( nextToLoad && !pageLoadingInProgress ) {
-			doLoadPage(nextToLoad, null);
-		}
-
-	}
-
-
-	/**Gets the current gamification status
-	 * @memberof material
-	 * @param {material.anyCallback} callback	A callback to receive the data*/
-	function getGamificationStatus(callback) {
-
-		var requestedMaterial = getRequestedMaterial();
-
-		if ( requestedMaterial ) {
-
-			utils.get("/o/cloubi-gamification/status/" + encodeURIComponent(requestedMaterial), function(data) {
-
-				gamification['status'] = data;
-
-				callback(data);
-
-			});
-
-		} else {
-
-			callback( gamification['status'] );
-
-		}
-
-	}
-
-	/**Locally updates the scores of a page.
-	 * NOTE: the scores are updated in the frontend only and are not persisted in any way.
-	 * @memberof material
-	 * @param {material.Page} page	The page object to update
-	 * @param {int} score			The user score to set
-	 * @param {int} scoreMax		The maximum page score to set
-	 * @param {float} progress		The user progress in the page, from 0 (not started) to 1 (finished)
-	 * @param {boolean} visited		True if the user has visited the page, false otherwise
-	 * @param {int} stars			The number of stars the user has earned on the page
-	 * @param {int} starsMax		The maximum number of stars the user can earn on the page*/
-	function updatePageScore(page, score, scoreMax, progress, visited, stars, starsMax) {
-
-		page.scores = page.scores || {};
-
-		console.log("Scores updated on page " + page.id + ": score " + score + "/" + scoreMax + ", progress " + progress + ", visited " + visited + ", stars " + stars + ", starsMax " + starsMax);
-
-		page.scores.scoreMax = scoreMax;
-		page.scores.score = score;
-		page.scores.progress = progress;
-		page.scores.visited = visited;
-		page.scores.stars = stars;
-		page.scores.starsMax = starsMax;
-
-		triggerPageChanged(page, ["scores"]);
-
-	}
-	
-	/**Updates the lock state of a page
-	 * @memberof material
-	 * @param {string} pageId						The ID of the page to update
-	 * @param {material.LockState} lockState		The new lock state of the page
-	 * @param {material.LockReason[]} lockReasons	The new lock reasons of the page*/
-	function updatePageLockState(pageId, lockState, lockReasons){
-		var promise = new $.Deferred();
-		if (lockState !== 'LOCKED') {
-			var loadingStatus = readLoadingStatus(getRequestedMaterial(), pageId);
-			if (loadingStatus){
-				loadingStatus.failed = false; //If we tried to load the page before and failed, retry
-			}
-			//Load page
-			getPage(pageId, function(page) {
-				if (page) {
-					//Ensure the page is at the correct index in its parent's child pages
-					var parentPageId = getParentPageId(page);
-					if (parentPageId){
-						getPage(parentPageId, function(parent){
-							if (parent && parent.childPages && !parent.childPages.includes(pageId) ){
-								getPageChildPages(parentPageId, {includeHiddenChildPages: true}, function(children){
-									parent.childPages.splice(getPageIndex(page, children), 0, pageId);
-									triggerPageChanged(parent, ["childPages"]);
-								})
-							}
-							promise.resolve(page);
-						})
-					}
-					else {
-						promise.resolve(page);
-					}
-				}
-				else {
-					promise.resolve();
-				}
-			});
-		}
-		else {
-			getPage(pageId, promise.resolve);
-		}
-		promise.then(function(page){
-			if (page) {
-				page.lockState = lockState;
-				page.lockReasons = lockReasons;
-				page.inactive = (lockState === "LOCKED");
-				
-				triggerPageChanged(page, ["lockState", "lockReasons", "inactive"]);
-			}
-		});
-	}
-	
-	function getPageIndex(page, pages) {
-		for (var i = 0; i < pages.length; i++){
-			if (page.id === pages[i].id || pages[i].pageIndex > page.pageIndex){
-				return i;
-			}
-		}
-		return pages.length;
-	}
-	
-	function updatePage(page, data){
-		var updated = [];
-		$.each(data, function(key, val){
-			if (page.hasOwnProperty(key) && !utils.deepEqual(page[key], val)) {
-				console.log("updating field " + key, page[key], "->", val)
-				page[key] = val;
-				updated.push(key);
-			}
-		})
-		console.log("Updated fields ", updated)
-		triggerPageChanged(page, updated);
-	}
-
-	/**Locally marks a page as visited
-	 * NOTE: the page is marked in the frontend only and the change is not persisted in any way
-	 * @memberof material
-	 * @param {material.Page} page	The page to mark*/
-	function markPageVisited(page) {
-
-		page.scores = page.scores || {};
-
-		console.log("Mark page " + page.id + " as visited");
-
-		page.scores.visited = true;
-
-		triggerPageChanged(page, ["scores.visited"]);
-
-	}
-
-	/**Locally updates a page's scores from a JS object
-	 * NOTE: the scores are updated in the frontend only and are not persisted in any way.
-	 * @memberof material
-	 * @param {material.Page} page		The page to update
-	 * @param {material.Page#scores} data	The updated scores*/
-	function updatePageScoreFromJSON(page, data) {
-
-		updatePageScore(page, data.score, data.scoreMax, data.progress, data.visited, data.stars, data.starsMax);
-
-	}
-
-	/**Gets the latest scores for a page from the server
-	 * @memberof material
-	 * @param {material.Page} page	The page to refresh*/
-	function refreshPageScores(page) {
-
-		if ( !page ) {
-			return;
-		}
-
-		var requestedMaterial = getRequestedMaterial();
-
-		var url = "/o/site-material-api/page-scores/" + encodeURIComponent(requestedMaterial) + "/" + encodeURIComponent(page.id);
-
-		utils.get(url, function(data) {
-			page.scores = Object.assign(page.scores || {}, data);
-			triggerPageChanged(page, ["scores"]);
-		});
-
-	}
-
-	/**Calls listeners to signal that page data has changed
-	 * @memberof material
-	 * @param {material.Page} page	The updated page
-	 * @param {string[]} [fields]	A list of fields that were updated*/
-	function triggerPageChanged(page, fields) {
-
-		jQuery.each(pageUpdatedListeners, function(index, func) {
-			func(page, fields);
-		});
-
-	}
-
-	/**Gets a list containing the requested page's child pages
-	 * @memberof material
-	 * @param {string|material.PageID} parentPageId	The ID of the parent page
-	 * @param {Object} [options]					An object specifying additional options on the pages to include
-	 * @param {boolean} [options.includeHiddenChildPages=false]	If true, hidden pages will be included in the results
-	 * @param {material.pageListCallback} callback	A callback function that receives the list of child pages*/
-	function getPageChildPages(parentPageId, options, callback) {
-
-		var childPages = [];
-
-		if (!options) options = {};
-
-		options = jQuery.extend({includeHiddenChildPages: false}, options);
-
-		getPage(parentPageId, function(parentPage) {
-			
-			if (parentPage.childPages.length > 0) {
-
-				var hideChildPages = !options.includeHiddenChildPages && parentPage.hideFromChildren ? true : false;
-				
-				var promises = []
-				// get pages
-				jQuery.each(parentPage.childPages, function(_, pageId) {
-					var promise = new jQuery.Deferred()
-					getPage(pageId,function(childPage) {
-						if (!hideChildPages && !childPage.hidden && !childPage.inactive) {
-							childPages.push(childPage);
-						}
-						
-						promise.resolve();
-					});
-				
-					promises.push(promise);
-				});
-
-				jQuery.when.apply(jQuery, promises).then(function() {
-					callback(childPages)
-				});
-				
-			} else {
-				callback(childPages);
-			}
-
-
-		});
-	}
-
-	/**Gets a list containing the requested page and all of its sibling pages
-	 * @memberof material
-	 * @param {string|material.PageID} pageId		The ID of the page
-	 * @param {material.pageListCallback} callback	A callback function that receives the list of sibling pages*/
-	function getPageLevelPages(pageId, callback) {
-
-		var levelPages = [];
-
-		getPage( pageId, function(page) {
-
-			if ( page &&  page.breadcrump.length > 1 ) {
-
-				var parentPageId = page.breadcrump[page.breadcrump.length-2];
-
-				getPageChildPages(parentPageId, {includeHiddenChildPages: true}, callback);
-
-			} else {
-
-				callback(levelPages);
-
-			}
-
-		} );
-
-	}
-
-	/**Gets a material page object, loading it from the server if necessary
-	 * @memberof material
-	 * @param {string|material.PageID} page		Either the page ID string of a page in the current material or an object identifying the page
-	 * @param {material.pageCallback} callback	A function to be called with the result after this function finishes.*/
-	function getPage(page, callback) {
-
-		var pageId;
-		var materialId;
-
-		if (typeof(page) === "object"){
-			pageId = page.pageId;
-			materialId = page.materialId;
-		}
-		else {
-			pageId = page;
-			materialId = getRequestedMaterial();
-		}
-
-		if ( getCachedPage(materialId, pageId) ) {
-
-			callback( getCachedPage(materialId, pageId) );
-
-		} else {
-
-			loadPage(page, null, callback);
-
-		}
-
-	}
-
-	/**Gets the root {@link Page} object of the current material structure
-	 * @memberof material
-	 * @param {material.pageCallback} callback  A callback function to invoke with the page*/
-	function getRootPage(callback) {
-
-		getCurrentPage(function(page) {
-			if (page) {
-				var rootPageId = page.breadcrump[0];
-				getPage(rootPageId, callback);
-			} else {
-				callback(null);
-			}
-		});
-
-	}
-
-	/**Gets the {@link Page} object of the currently visible material page
-	 * @memberof material
-	 * @param {material.pageCallback} callback	A callback function to invoke with the page*/
-	function getCurrentPage(callback) {
-
-		if ( currentPageId ) {
-			getPage(currentPageId, callback);
-		} else {
-			callback(null);
-		}
-
-	}
-
-	/**Sets the ID of the current page.
-	 * NOTE: this will not automatically load the page. To change to the specified page, use {@link material.changePage} instead
-	 * @memberof material
-	 * @param pageId {string}	The page ID to set as current*/
-	function setCurrentPageId(pageId) {
-
-		currentPageId = pageId;
-
-	}
-
-	/**Sets a specific page within the current material as the last viewed page
-	 * @memberof material
-	 * @param {string} pageId	The ID of the page to set as the last viewed page*/
-	function setLastPageId(pageId) {
-
-		getPage(pageId, function(page) {
-
-			if ( page ) {
-
-				jQuery.each(loadedPages[getRequestedMaterial()], function(otherPageId, otherPage) {
-					otherPage.lastPage = false;
-				});
-
-				page.lastPage = true;
-				lastPageId = pageId;
-
-			}
-
-		});
-
-	}
-
-	/**Gets the {@link material.Page} object of the last viewed page
-	 * @memberof material
-	 * @param {material.pageCallback} callback	A function to pass the page object*/
-	function getLastPage(callback) {
-
-		if ( lastPageId ) {
-
-			getPage(lastPageId, callback);
-
-		} else {
-
-			console.log("Last page is not available");
-
-		}
-
-	}
-
-	/**Gets a page that has the specified identifier
-	 * @memberof material
-	 * @param {string} identifier				The identifier to search for
-	 * @param {material.pageCallback} callback	A callback to handle the page*/
-	function getPageWithIdentifier(identifier, callback) {
-
-		var loadedPageWithIdentifier = null;
-		var requestedMaterial = getRequestedMaterial();
-
-		jQuery.each(loadedPages[requestedMaterial], function(pageId, page) {
-
-			if ( page.hasOwnProperty("identifier") ) {
-
-				if ( page.identifier == identifier ) {
-					loadedPageWithIdentifier = page;
-				}
-
-			}
-
-		});
-
-		if ( loadedPageWithIdentifier ) {
-
-			callback(loadedPageWithIdentifier);
-
-		} else {
-
-			utils.post("/o/site-material-api/find-pages/" + encodeURIComponent(requestedMaterial), {identifier: identifier}, function(data) {
-
-				if ( data.pageId ) {
-
-					getPage(data.pageId, callback);
-
-				}
-
-			});
-
-		}
-
-	}
-
-	/**Gets a list of all pages with the specified tag
-	 * @memberof material
-	 * @param {string} tag							The tag to search for
-	 * @param {material.pageListCallback} callback	The callback to pass the resultsk*/
-	function getPagesWithTag(tag, callback) {
-
-		getCurrentPage(function(page) {
-
-			var loadedPagesWithTag = [];
-			var currentPageValid = false;
-			var foundLocalPages = false;
-			var requestedMaterial = getRequestedMaterial();
-
-			if ( jQuery.inArray( tag, page.contentTags ) > -1 ) {
-				currentPageValid = true;
-			}
-
-			jQuery.each(loadedPages[requestedMaterial], function(pageId, page) {
-
-				if ( jQuery.inArray( tag, page.contentTags ) > -1 ) {
-					loadedPagesWithTag.push(page);
-					foundLocalPages = true;
-				}
-
-			});
-
-			if ( foundLocalPages ) {
-
-				console.log("Found " + loadedPagesWithTag.length + " pages with tag " + tag + " locally");
-
-				callback(loadedPagesWithTag, currentPageValid);
-
-			} else {
-
-				utils.post("/o/site-material-api/find-pages/" + encodeURIComponent(requestedMaterial), {tag: tag}, function(data) {
-
-					if ( data.pageIds ) {
-
-						var pages = [];
-
-						jQuery.each(data.pageIds, function(index, pageId) {
-							getPage(pageId, function(page) {
-								pages.push(page);
-								if ( pages.length == data.pageIds.length ) {
-									callback(pages, currentPageValid);
-								}
-							});
-						});
-
-					}
-
-				});
-
-			}
-
-		});
-
-	}
-
-	/**Changes the page to a page in the current material that has the specified tag.
-	 * If multiple pages have the tag, the first will be loaded.
-	 * @memberof material
-	 * @param {string} tag								The content tag of the page to change to
-	 * @param {material.PageChangeOptions} [options]	Extra options for the page change operation*/
-	function changePageWithContentTag(tag, options) {
-
-		getPagesWithTag( tag, function(validPages, currentPageValid) {
-
-			if ( validPages.length > 0 && !currentPageValid ) {
-				changePage( validPages[0].id, options );
-			}
-
-		} );
-
-	}
-
-	/**Opens the nearest visible ancestor of the currently open page
-	 * @memberof material*/
-	function upOneLevel() {
-
-		getCurrentPage(function(page) {
-
-			backToPage( getParentPageId(page) );
-
-		});
-
-	}
-
-	/**Opens the specified page or its first visible ancestor if it's hidden
-	 * @memberof material
-	 * @param {string|PageID} pageId		The ID of the page to open
-	 * @param {pageChangeOptions} [options]	Additional page change options*/
-	function backToPage(pageId, options) {
-
-		options = jQuery.extend( { back: true }, options );
-
-		changePage(pageId, options);
-
-	}
-
-	function getParentPageId(page) {
-
-		if ( page.breadcrump.length > 1 ) {
-
-			return page.breadcrump[ page.breadcrump.length - 2 ];
-
-		} else {
-
-			return null;
-
-		}
-
-	}
-
-	/**Gets a {@link Page} that is the parent of the given page.
-	 * @memberof material
-	 * @param {material.Page} page				The page whose parent to get.
-	 * @param {material.pageCallback} callback	A callback to handle the page*/
-	function getParentPage(page, callback) {
-
-		var parentId = getParentPageId(page);
-
-		if ( parentId != null ) {
-			getPage(parentId, callback);
-		}
-
-	}
-
-
-
-
-	/**Get information about current material.
-	 * @memberof material
-	 * @param {materialCallback} callback 	A callback to handle the material.
-	 */
-	function getCurrentMaterial(callback) {
-		if ( self.Cloubi && Cloubi.currentMaterial ) {
-			callback(Cloubi.currentMaterial);
-		}
-	}
-
-	/**Replaces the current browser history URL
-	 * @memberof material
-	 * @param {Object} stateObj	The object to associate with the current history state
-	 * @param {string} url		The replacement URL*/
-	function replaceCurrentHistoryUrl(stateObj, url) {
-		//history.replaceState({pageId: page.id}, "", page.url);
-		history.replaceState(stateObj, "", url + window.location.hash);
-	}
-
-	/**Loads an extra page
-	 * @memberof material
-	 * @param {material.ExtraPage} extraPage		The extra page object
-	 * @param {material.PageChangeOptions} options	Extra options for the page change
-	 * @parma {material.extraPageCallback} callback	A callback that is invoked after the page changes*/
-	function changeToExtraPage(extraPage, options, callback) {
-
-		options = jQuery.extend( { addPageToHistory: true }, options );
-
-
-		var previousPageUrl = self.location.href;
-
-		getCurrentPage(function(page) {
-
-
-			if (page) {
-
-				extraPage.pageUrl = utils.addUrlParameter(extraPage.pageUrl, 'pageid', page.id);
-			} else {
-
-				extraPage.pageUrl = utils.addUrlParameter(extraPage.pageUrl, 'previousurl', previousPageUrl);
-			}
-
-
-
-			if (options.addPageToHistory) {
-
-				history.pushState( {extraPage: extraPage}, "", extraPage.pageUrl );
-			}
-
-			// We are opening page with AJAX, call loading listeners
-
-			var promises = [];
-
-			jQuery.each( pageStartsLoadingListeners, function(index, func) {
-				promises.push( func(extraPage, options) );
-			} );
-
-			pageStartsLoadingListeners = pageStartsLoadingListeners.filter(function(func){return !func._removeOnPageChange});
-			pageUpdatedListeners = pageUpdatedListeners.filter(function(func){return !func._removeOnPageChange});
-			fontSizeListeners = fontSizeListeners.filter(function(func){return !func._removeOnPageChange});
-
-			// Wait for all onPageStartsLoading promises to resolve.
-			jQuery.when.apply(null, promises).done(function() {
-
-				currentPageId = null;
-
-				jQuery("#content").empty().load(extraPage.pageContentUrl, function() {
-
-					jQuery.each(extraPageChangeListeners, function(index, func) {
-						func(extraPage, null);
-					});
-
-					extraPageChangeListeners = extraPageChangeListeners.filter(function(func){return !func._removeOnPageChange});
-					pageChangeListeners = pageChangeListeners.filter(function(func){return !func._removeOnPageChange});
-
-					if (callback) callback(extraPage);
-
-				});
-			});
-		});
-
-	}
-
-	/**Checks if the currently visible page is an extra page
-	 * @memberof material
-	 * @return {boolean}	True if an extra page is visible*/
-	function isExtraPageVisible() {
-		return utils.hasUrlPathPart('extra-page') || utils.hasUrlPathPart('my-page');
-	}
-
-	function invokePageChangeListeners(page, options, data){
-		jQuery.each(pageChangeListeners, function(index, func) {
-			func(page, options, data);
-		});
-
-		extraPageChangeListeners = extraPageChangeListeners.filter(function(func){return !func._removeOnPageChange});
-		pageChangeListeners = pageChangeListeners.filter(function(func){return !func._removeOnPageChange});
-	}
-
-	/**Changes the currently open material page, loading the data from the server if necessary
-	 * @memberof material
-	 * @param {string|material.PageID} pageId				The ID of the page to change to
-	 * @param {material.PageChangeOptions} [options]		Contains extra options for the page change operation*/
-	function changePage(pageId, options) {
-
-		options = jQuery.extend( { addPageToHistory: true, ignorePageMappers: false, loadContent: true, back: false }, options );
-
-		var mapperFunc = pageMappers[pageId];
-
-		if ( !options.ignorePageMappers && jQuery.isFunction(mapperFunc) ) {
-
-			// A mapper function exists for this pageId. Just delegate everything to it.
-			mapperFunc(pageId);
-
-		} else {
-
-			getPage(pageId, function(page) {
-
-				if ( page.hideFromNavigation ) {
-
-					// This page is hidden from navigation, so we cannot change directly to it.
-					// Instead, we change either to the parent page or first child page, depending
-					// on whether we are moving "up" or "down" in the navigation hierarchy.
-
-					var optionsWithoutBack = jQuery.extend( {}, options, { back: false } );
-
-					if ( options.back ) {
-
-						// We are moving up in navigation hierarchy, open parent page instead.
-						changePage( getParentPageId(page), options );
-
-					} else {
-						// We are moving down in navigation hierarchy, open first child page instead.
-						getPageChildPages(page.id, {}, function(pages){
-							pages = pages.filter(function(page){
-								return !page.inactive && page.lockState !== 'LOCKED' && page.lockState !== 'SHOW_IN_NAVIGATION_ONLY';
-							});
-							
-							if ( pages.length > 0 ) {
-								changePage( pages[0].id, optionsWithoutBack );
-							}
-						})
-
-						
-
-					}
-
-				} else {
-
-					if ( ajaxLoadEnabled && sameMaterial(pageId) ) {
-
-						// We are opening page with AJAX from current material.
-						// This is the default case.
-
-						var promises = [];
-
-						jQuery.each( pageStartsLoadingListeners, function(index, func) {
-							promises.push( func(page, options) );
-						} );
-						pageStartsLoadingListeners = pageStartsLoadingListeners.filter(function(func){return !func._removeOnPageChange});
-						pageUpdatedListeners = pageUpdatedListeners.filter(function(func){return !func._removeOnPageChange});
-						fontSizeListeners = fontSizeListeners.filter(function(func){return !func._removeOnPageChange});
-
-						// Wait for all onPageStartsLoading promises to resolve.
-						jQuery.when.apply(null, promises).done(function() {
-
-							if ( options.addPageToHistory ) {
-								history.pushState( {pageId: page.id}, "", page.url );
-							}
-
-							//Get any data parameter from pageId and forward it to listeners
-							var data = {};
-							if (typeof(pageId) === "object" && pageId.data){
-								data = pageId.data;
-							}
-
-							if ( options.loadContent ) {
-
-								var renderer = pageContentTypeRenderers[page.contentType ? page.contentType : 'navigation/menu'];
-
-								if ( renderer ) {
-
-									// We have a custom renderer for this type of page, no
-									// need to load it from the server. Just call the renderer.
-									jQuery("#content").empty();
-									setTimeout(function() {
-										renderer(page, "content", function() {
-											invokePageChangeListeners(page, options, data);
-										});
-									}, 1);
-
-								} else {
-
-									// Load up-to-date version of the new page from server and then
-									// call any listeners.
-
-									// Adding cache bust to URL to prevent iOS to fetch the content from cache.
-									var url = page.contentUrl;
-									url.indexOf("?") == -1 ? url += "?" : url += "&";
-									url += "c=" + ((new Date()).getTime());
-
-									jQuery("#content").empty().load(url, function() {
-										invokePageChangeListeners(page, options, data);
-									});
-
-								}
-
-								// Toggle language attribute in the elements with "content" id
-								if (page.language) {
-									jQuery("#content").attr({lang: page.language});
-								}
-								else {
-									jQuery("#content").removeAttr("lang");
-								}
-
-
-							} else {
-
-								// Skip loading the actual page content. Just leave current page content
-								// as it is and call listeners that we have "changed" the page.
-
-								invokePageChangeListeners(page, options, data);
-
-							}
-
-							setCurrentPageId(typeof(pageId) === 'object' ? pageId.pageId : pageId);
-
-						});
-
-					} else {
-
-						// Either we are not using AJAX (we should!) or the target page
-						// is not from current material. Anyway, we must do full page load.
-
-						//Still invoke listeners to make sure everything is saved
-						var promises = [];
-						jQuery.each( pageStartsLoadingListeners, function(index, func) {
-							promises.push( func(page, options) );
-						} );
-
-						jQuery.when.apply(null, promises).done(function() {
-
-							var url = page.url; 	// This is the full URL of the page.
-
-							if ( typeof(pageId) === 'object' && pageId.urlParams ) {
-								// Page has some URL parameters. Append them to the URL.
-								jQuery.each(pageId.urlParams, function(key, value) {
-									url = utils.addUrlParameter(url, key, value);
-								})
-							}
-
-							self.location = url;
-
-						});
-					}
-
-				}
-
-			});
-
-		}
-
-		/**Checks if the page to open is in the same material as the one currently open
-		 * @param {String|material.PageId} page	The ID of the page to open
-		 * @return {Boolean}	true if the page is in the same material as the currently open page*/
-		function sameMaterial(pageId){
-			//If the ID is not an object, assume that it is a string ID in the current material
-			if (typeof(pageId) !== 'object'){
-				return true;
-			}
-			//Check if the numeric ID matches, if present
-			if (pageId.numericMaterialId){
-				return pageId.numericMaterialId == getCurrentMaterialId();
-			}
-			//Check if the
-			return pageId.materialId == getRequestedMaterial();
-		}
-
-	}
-
-	/**Registers a listener that is called whenever an extra page is shown
-	 * @memberof material
-	 * @param {material.extraPageCallback} func	The listener function
-	 * @param {Boolean} removeOnPageChange		If true, the listener will automatically be removed after the page is changed.
-	 * 											Set this to true for listeners set by page content*/
-	function onExtraPageChange(func, removeOnPageChange) {
-		func._removeOnPageChange = removeOnPageChange;
-		extraPageChangeListeners.push(func);
-	}
-
-	/**Registers a callback listener to be invoked whenever the currently displayed page changes
-	 * @memberof material
-	 * @param {material.pageChangeListener} func	The callback function to invoke on page change
-	 * @param {Boolean} removeOnPageChange		If true, the listener will automatically be removed after the page is changed.
-	 * 											Set this to true for listeners set by page content*/
-	function onPageChange(func, removeOnPageChange) {
-		func._removeOnPageChange = removeOnPageChange;
-		pageChangeListeners.push(func);
-
-	}
-	
-	/**Removes a callback listener to be invoked when the page changes
-	 * @param {material.pageChangeListener} func	A registered page load callback function*/
-	function offPageChange(func) {
-		var index = pageChangeListeners.indexOf(func);
-		if (index > -1) {
-			pageChangeListeners.splice(index, 1);
-		}
-	}
-
-	/**Registers a callback listener to be invoked when a page change is requested, but before it actually takes place
-	 * @memberof material
-	 * @param {material.beforePageChangeListener} func	The callback function to invoke before page change
-	 * @param {Boolean} removeOnPageChange				If true, the listener will automatically be removed immediately
-	 * 													before the page is changed (after being invoked).
-	 * 													Set this to true for listeners set by page content*/
-	function onPageStartsLoading(func, removeOnPageChange) {
-		func._removeOnPageChange = removeOnPageChange;
-		pageStartsLoadingListeners.push(func);
-
-	}
-
-	/**Removes a callback listener to be invoked when a page change is requested, but before it actually takes place
-	 * @memberof material
-	 * @param {material.beforePageChangeListener} func	A registered page load callback function*/
-	function offPageStartsLoading(func) {
-
-		var index = pageStartsLoadingListeners.indexOf(func);
-		if (index > -1) {
-			pageStartsLoadingListeners.splice(index, 1);
-		}
-
-	}
-
-	/**Registers a mapper function to redirect the user from certain pages to others
-	 * @memberof material
-	 * @param {string} pageId				The ID of the page to redirect from
-	 * @param {material.pageMapper} func	The function to use to determine where to redirect*/
-	function registerPageMapper(pageId, func) {
-
-		pageMappers[pageId] = func;
-
-	}
-
-	/**Registers a callback to listen for changes in page data
-	 * @memberof material
-	 * @param {material.pageUpdateCallback} func	A function that is invoked whenever page data changes
-	 * @param {Boolean} removeOnPageChange			If true, the listener will automatically be removed immediately before the page is changed.
-	 * 												Set this to true for listeners set by page content*/
-	function onPageUpdated(func, removeOnPageChange) {
-		func._removeOnPageChange = removeOnPageChange;
-		pageUpdatedListeners.push(func);
-
-	}
-
-	/**Removes a callback to listen for changes in page data
-	 * @memberof material
-	 * @param {material.pageCallback} func	A registered page update callback function*/
-	function offPageUpdated(func) {
-
-		var index = pageUpdatedListeners.indexOf(func);
-		if (index > -1) {
-			pageUpdatedListeners.splice(index, 1);
-		}
-
-	}
-
-	/**Sets up a playlist change listener
-	 * @memberof material
-	 * @param {material.playlistCallback} func	A function that will be called whenever a playlist is set or removed.
-	 * 											The function parameter is the newly set playlist.
-	 * 											When the playlist is removed, the function will be invoked with null.*/
-	function onPlaylistChange(func) {
-		playlistChangeListeners.push(func);
-	}
-
-	function getWaitingObj(type, waitingObjs) {
-		var waitingObj = waitingObjs[type];
-
-		if (!waitingObj) {
-			waitingObj = {};
-			waitingObjs[type] = waitingObj;
-			waitingObj.promise = new $.Deferred();
-		}
-
-		return waitingObj;
-	}
-
-	function setWaitingObjReady(waitingObj, property, value) {
-		waitingObj[property] = value;
-		waitingObj.promise.resolve();
-	}
-
-	function getWaitingObjProperty(waitingObj, property, callback) {
-
-		waitingObj.promise.then(function() {
-			callback(waitingObj[property]);
-		});
-
-	}
-
-	/**Sets a renderer
-	 * @memberof material
-	 * @param {string} type		The type of the renderer
-	 * @param {any} renderer	The renderer*/
-	function setRenderer(type, renderer) {
-
-		var rendererObj = getWaitingObj(type, renderers);
-		setWaitingObjReady(rendererObj, 'renderer', renderer);
-
-	}
-
-	/**Gets a renderer when it becomes available
-	 * @memberof material
-	 * @param {string} type							The type of renderer to get
-	 * @param {material.anyCallback} getCallback	A callback to receive the renderer*/
-	function getRenderer(type, getCallback) {
-
-		getWaitingObjProperty( getWaitingObj(type, renderers), 'renderer', getCallback );
-
-	}
-
-	/**Sets custom page data
-	 * @memberof material
-	 * @param {string} type		The type of data
-	 * @param {any} renderer	The data*/
-	function setPageCustomData(type, customPageData) {
-
-		var waitingObj = getWaitingObj(type, pageCustomDatas);
-		setWaitingObjReady(waitingObj, 'customPageData', customPageData);
-	}
-
-	/**Sets custom page data when it becomes available
-	 * @memberof material
-	 * @param {string} type							The type of data to get
-	 * @param {material.anyCallback} getCallback	A callback to receive the data*/
-	function getPageCustomData(type, getCallback) {
-
-		getWaitingObjProperty( getWaitingObj(type, pageCustomDatas), 'customPageData', getCallback );
-	}
-
-	/**Adds or removes a bookmark on a page
-	 * @memberof material
-	 * @param {string} pageId	The ID of a page in the current material
-	 * @param {boolean} enabled	true if the bookmark should be set, false if it should be removed*/
-	function setBookmark(pageId, enabled) {
-
-		var requestedMaterial = getRequestedMaterial();
-
-		if ( requestedMaterial ) {
-
-			var data = {};
-
-			data[pageId] = enabled;
-
-			utils.post("/o/site-material-api/set-bookmarks/" + encodeURIComponent(requestedMaterial), data);
-
-			getPage(pageId, function(page) {
-
-				page.bookmarked = enabled;
-
-				triggerPageChanged(page, ["bookmarked"]);
-
-			});
-
-		}
-
-	}
-
-	/**Sets whether the content of material pages can be loaded with AJAX and inserted into the current page or if the browser should
-	 * actually navigate to the content URL
-	 * @memberof material
-	 * @param {boolean} value	If true, new page content will be loaded with AJAX, if false, the browser will load the content as a full web page*/
-	function setAjaxLoadEnabled(value) {
-
-		ajaxLoadEnabled = value;
-
-	}
-
-	/**Gets the achievements for a page
-	 * @memberof material
-	 * @param {material.Page} page	The page data object
-	 * @return {Object}	The achievements for the page, as determined by the current {@link material.AchievementCalculator}*/
-	function getAchievements(page) {
-		return _achievementCalculator(page);
-	}
-
-	/**Sets the achievement calculator
-	 * @memberof material
-	 * @param {material.AchievementCalculator} calculator	The calculator to register*/
-	function registerAchievementCalculator(calculator) {
-		_achievementCalculator = calculator;
-	}
-
-
-	/**Sets a renderer for give page content type. Whenever a page changes and the content type of the
-	 * new page is as given, this renderer function will be called instead of loading page content from the server.
-	 * @memberof material
-	 * @param {string} contentType  The content type to register the renderer with. For example, 'navigation/menu'.
-	 * @param {material.PageContentTypeRenderer} renderer 	The renderer function.
-	 */
-	function registerPageContentTypeRenderer(contentType, renderer) {
-		pageContentTypeRenderers[contentType] = renderer;
-	}
-
-
-	/**Gets the current custom font size
-	 * @memberof material
-	 * @return {int}	The current font size*/
-	function getFontSize() {
-		return fontSize;
-	}
-
-	/**Sets a custom font size and notifies listeners
-	 * @memberof material
-	 * @param {int} size	The size to set*/
-	function setFontSize(size) {
-		fontSize = size;
-		jQuery.each(fontSizeListeners, function(index, func) {
-			func(size);
-		});
-	}
-
-	/**Registers a listener for font size changes
-	 * @memberof material
-	 * @param {material.intCallback} callback	The callback to receive the new font value*/
-	function onFontSizeChange(callback, removeOnPageChange) {
-		callback._removeOnPageChange = removeOnPageChange;
-		fontSizeListeners.push(callback);
-	}
-
-	/**Initializes the material state, sets up event listeners and calls all {@link materialReadyListener}s
-	 * @memberof material
-	 * @param {string} currentPageId	The ID of the initial page
-	 * @param {string} materialId		The ID of the initial material
-	 * @param {int} loadPagesByLevel 	Tells server how many levels down are loaded with root page*/
-	function init(currentPageId, materialId, loadPagesByLevel) {
-		if ( currentPageId ) {
-			setCurrentPageId(currentPageId);
-		}
-
-		if ( materialId ) {
-			currentMaterialId = materialId;
-		}
-
-		window.onpopstate = function(event) {
-
-			if ( event.state ) {
-
-				if ( event.state.pageId ) {
-
-					changePage( event.state.pageId, {
-						addPageToHistory: false,
-						ignorePageMappers: true
-					} );
-				} else if (event.state.extraPage) {
-					changeToExtraPage(event.state.extraPage, {addPageToHistory: false});
-
-				}
-
-			}
-
-		}
-
-		if ( currentMaterialId ) {
-
-			jQuery.each(materialReadyListeners, function(index, func) {
-				func();
-			});
-
-			materialReadyListeners = null;
-
-		} else {
-			if(loadPagesByLevel) {
-				loadPagesWithLevel(loadPagesByLevel, function() {
-
-					jQuery.each(materialReadyListeners, function(index, func) {
-						func();
-					});
-	
-					materialReadyListeners = null;
-	
-				});
-			}
-			else {
-				getCurrentPage(function() {
-
-					jQuery.each(materialReadyListeners, function(index, func) {
-						func();
-					});
-	
-					materialReadyListeners = null;
-	
-				});
-			}	
-		}
-	}
-
-	/**Registers a callback to be invoked when the material becomes availabe
-	 * @memberof material
-	 * @param {Function} callback	A function to invoke when the material is available*/
-	function onMaterialReady(callback) {
-		if ( materialReadyListeners ) {
-			materialReadyListeners.push(callback);
-		} else {
-			callback();
-		}
-	}
-
-	/**Gets the numeric ID of the material containing the current page
-	 * @memberof material
-	 * @return {long}	The ID of the current material*/
-	function getCurrentMaterialId(){
-		return loadedPages[getRequestedMaterial()]._materialId;
-	}
-
-	/**Gets the page ID of the current page
-	 * @memberof material
-	 * @return {string}	The ID of the current page*/
-	function getCurrentPageId(){
-		return currentPageId;
-	}
-
-	/**Gets the content type string of the material containing the current page
-	 * @memberof material
-	 * @return {string}	The content type of the current material*/
-	function getCurrentMaterialContentType(){
-		return loadedPages[getRequestedMaterial()]._contentType;
-	}
-
-	/**Sets a playlist as the currently active playlist
-	 * @memberof material
-	 * @param {?material.Playlist} playlist	An object representing a playlist or null if the current playlist should be removed
-	 * @param {?integer} pageIndex			The number of the initial page to show*/
-	function setCurrentPlaylist(playlist, pageIndex){
-		currentPlaylist = playlist;
-
-		var pageBeforePlaylistChange = {
-			pageId: currentPageId,
-			materialId: getRequestedMaterial()
-		};	
-
-		if (playlist){	
-
-			//Use the playlist as a page source and load the first page
-			currentPageSource = new PlaylistPageSource();
-			if ( typeof(pageIndex) === 'number' ){
-				currentPageSource.setCurrentPageIndex(pageIndex -1);
-			}
-			else {
-				pageIndex = 0;
-			}
-			changeToNextPage();
-		}
-		else {
-			//Switch back to default material page source
-			currentPageSource = new DefaultPageSource();
-					
-		}
-
-		//Inform listeners about playlist change
-		jQuery.each(playlistChangeListeners, function(index, func) {
-			func(playlist, pageBeforePlaylistChange, pageIndex);
-		});
-	}
-
-	/**Gets the currently active playlist
-	 * @memberof material
-	 * @return {?material.Playlist}	An object representing the currently active playlist or null if no playlist is active*/
-	function getCurrentPlaylist(){
-		return currentPlaylist;
-	}
-
-	/**Moves to the next page as determined by the current {@link material.PageSource}
-	 * @memberof material*/
-	function changeToNextPage(){
-		currentPageSource.getNextPageId(function(id){
-			if (id){
-				changePage(id, {});
-			}
-		});
-	}
-
-	/**Moves to the previous page as determined by the current {@link material.PageSource}
-	 * @memberof material*/
-	function changeToPreviousPage(){
-		currentPageSource.getPreviousPageId(function(id){
-			if (id){
-				changePage(id, {});
-			}
-		});
-	}
-
-	/**Sets the current {@link material.PageSource}
-	 * @memberof material
-	 * @param {material.PageSource} source	The page source to set*/
-	function registerPageSource(source){
-		currentPageSource = source;
-	}
-
-	/**Gets the current {@link material.PageSource}, is any.
-	 * @memberof material
-	 * @return {material.PageSource} The page source.*/
-	function getPageSource() {
-		return currentPageSource;
-	}
-
-	/**@deprecated call {@link material.changePage} with a {@link material.PageID} object instead
-	 * @memberof material*/
-	function changeMaterial(requestedMaterial, callback){
-		currentRequestedMaterial = requestedMaterial;
-		callback();
-	}
-
-	/**Gets the permissions that the current user has for the current material
-	 * @memberof material
-	 * @param {material.permissionListCallback} callback	A callback to handle the permissions*/
-	function getCurrentMaterialPermissions(callback){
-		if (materialPermissions){
-			callback(materialPermissions);
-		}
-		else {
-			var requestedMaterial = getRequestedMaterial();
-			if (requestedMaterial){
-				utils.get("/o/site-material-api/permissions/" + encodeURIComponent(requestedMaterial), function(response){
-					if (response.permissions){
-						materialPermissions = response.permissions;
-						callback(materialPermissions);
-					}
-					else {
-						callback([]);
-					}
-				});
-			}
-			else {
-				callback([]);
-			}
-		}
-	}
-
-	/**Tells wheter or not load scores along with the pages. If the theme never uses
-	 * page.scores attribute, then this can be set to true.
-	 * @memberof material
-	 * @param {boolean} skipLoadingScores	True, to not load page scores along with pages.*/
-	function setSkipLoadingScores(skipLoadingScores) {
-		performanceHints.skipLoadingScores = skipLoadingScores;
-	}
-
-	/** If Analytics Framework isn't installed on the server, the server can be configured
-	 * to either use the pages-with-scores endpoint or not load scores at all in material.json.
-	 * Returns true to use the pages-with-scores endpoint, false to not load scores.
-	 * @memberof material 
-	 * @return {boolean} */
-	function loadPageScores() {
-		return Cloubi.pageScoreSettingLoadScores;
-	}
-
-	/** If Analytics Framework is installed on the server, this can be used to not load scores from it.
-	 * True to not use Analytics Framework, false to use it. Configurable on the server.
-	 * @memberof material 
-	 * @return {boolean} */
-	function doNotLoadFromAnalytics() {
-		return Cloubi.doNotLoadScoresFromAnalytics;
-	}
-
-	/** Tells whether or not Analytics Framework is installed by reading a global JS variable
-	 * from the document head, which can be utilized to load PagesScores from 
-	 * the Analytics Framework instead of an endpoint. Also,
-	 * if the user isn't logged into Cloubi, such as with Otava's open demoproducts,
-	 * set isAnalyticsFrameworkInstalled to false to not load scores from the task-status microservice.
-	 * @memberof material 
-	 * @return {boolean}	True, if Analytics Framework is installed on the server. */
-	function isAnalyticsFrameworkInstalled() {
-		if(Cloubi.analyticsFrameworkAvailable && themeDisplay.isSignedIn()) {
-			return Cloubi.analyticsFrameworkAvailable;
-		} else {
-			return false;
-		}
-	}
-	
-	/**Gets metadata of the current material
-	 * @memberof material
-	 * @param {material.metadataCallback} callback	A callback function to handle metadata*/
-	function getMetadataForCurrentMaterial(callback) {
-		if (metadata){
-			callback(metadata);
-		}
-		else {
-			var requestedMaterial = getRequestedMaterial();
-
-			if ( requestedMaterial ) {
-
-				var url = "/o/site-material-api/metadata-for-current-material/" + encodeURIComponent(requestedMaterial);
-
-				utils.get(url, function(response){
-					if (response){
-						metadata = response;
-						callback(metadata);
-					}
-					else {
-						callback({});
-					}
-				});
-			}
-			else {
-				callback({});
-			}
-		}
-	}
-
-	return {
-		init: init,
-		getPage: getPage,
-		getRootPage: getRootPage,
-		getCurrentPage: getCurrentPage,
-		getCurrentMaterialId: getCurrentMaterialId,
-		getCurrentMaterialContentType: getCurrentMaterialContentType,
-		getCurrentPageId: getCurrentPageId,
-		setCurrentPageId: setCurrentPageId,
-		setLastPageId: setLastPageId,
-		changePage: changePage,
-		onPageChange: onPageChange,
-		offPageChange: offPageChange,
-		onPageStartsLoading: onPageStartsLoading,
-		offPageStartsLoading: offPageStartsLoading,
-		setAjaxLoadEnabled: setAjaxLoadEnabled,
-		changePageWithContentTag: changePageWithContentTag,
-		registerPageMapper: registerPageMapper,
-		getPageLevelPages: getPageLevelPages,
-		getPageChildPages: getPageChildPages,
-		onPageUpdated: onPageUpdated,
-		offPageUpdated: offPageUpdated,
-		setBookmark: setBookmark,
-		getRequestedMaterial: getRequestedMaterial,
-		updatePageScore: updatePageScore,
-		markPageVisited: markPageVisited,
-		updatePageScoreFromJSON: updatePageScoreFromJSON,
-		updatePageLockState: updatePageLockState,
-		updatePage: updatePage,
-		backToPage: backToPage,
-		upOneLevel: upOneLevel,
-		setRenderer: setRenderer,
-		getRenderer: getRenderer,
-		setPageCustomData: setPageCustomData,
-		getPageCustomData: getPageCustomData,
-		getLastPage: getLastPage,
-		registerAchievementCalculator: registerAchievementCalculator,
-		getAchievements: getAchievements,
-		getFontSize: getFontSize,
-		setFontSize: setFontSize,
-		onFontSizeChange: onFontSizeChange,
-		getGamificationStatus: getGamificationStatus,
-		onExtraPageChange: onExtraPageChange,
-		changeToExtraPage: changeToExtraPage,
-		isExtraPageVisible: isExtraPageVisible,
-		onMaterialReady: onMaterialReady,
-		replaceCurrentHistoryUrl: replaceCurrentHistoryUrl,
-		triggerPageChanged: triggerPageChanged,
-		getPageWithIdentifier: getPageWithIdentifier,
-		getPagesWithTag: getPagesWithTag,
-		refreshPageScores: refreshPageScores,
-		onPlaylistChange: onPlaylistChange,
-		setCurrentPlaylist: setCurrentPlaylist,
-		getCurrentPlaylist: getCurrentPlaylist,
-		changeToNextPage: changeToNextPage,
-		changeToPreviousPage: changeToPreviousPage,
-		registerPageSource: registerPageSource,
-		getPageSource: getPageSource,
-		changeMaterial: changeMaterial,
-		registerPageContentTypeRenderer: registerPageContentTypeRenderer,
-		getParentPage: getParentPage,
-		getCurrentMaterial: getCurrentMaterial,
-		getCurrentMaterialPermissions: getCurrentMaterialPermissions,
-		setSkipLoadingScores: setSkipLoadingScores,
-		getMaterialISBNs: getMaterialISBNs,
-		getMetadataForCurrentMaterial: getMetadataForCurrentMaterial
-	};
-
-
-
-});
-
-
-
-
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/gamification', ['./utils', './material'], function(utils, material) {
-	
-	/**
-	 Contains functions for interacting with Cloubi's gamification features.
-	 <br><br>
-	 These function are intended to be used within materials. If used outside materials, make sure to always manually provide material IDs.
-	 <br><br>
-	 
-	 To use this API, load it like this:
-	 
-	 <pre><code>
-	require(['fi.cloubi.frontend/gamification'], function(gamification) {
-		gamification.isEnabled().then( function(enabled) {
-			if (enabled) console.log("Gamification is enabled");
-			else console.log("Gamification is disabled");
-		});
-	});
-	 </code></pre>
-	 
-	 * @namespace gamification */
-	
-	/**An array of errors encountered while executing a request.
-	 * All gamification functions except isEnabled will return the error "no-such-realm" if the function is called for a material
-	 * that does not have gamification features enabled.
-	 * @memberof gamification
-	 * @typedef {Array} Error*/
-	
-	/**Represents an achievement that the player can level up by meeting certain criteria.
-	 * @memberof gamification
-	 * @typedef {Object} Achievement
-	 * @property {string} id									The ID of this achievement
-	 * @property {string} title 								The name of this achievement
-	 * @property {string} description							The description of this achievement
-	 * @property {string} [group]								The name of the achievement group this achievement belongs to (if any)
-	 * @property {number} level									The user's current level number in this achievement. 
-	 * 															Level 0 means that the achievement has not yet been unlocked.
-	 * @property {gamification.AchievementLevel} currentLevel	The data of the user's current level in this achievement.
-	 * @property {gamification.AchievementLevel} [nextLevel]	The data of the user's next level in this achievement, if any.*/
-	
-	/**Represents a single level in an achievement. Each level must be unlocked separately and has its own unlock criteria.
-	 * @memberof gamification
-	 * @typedef {Object} AchievementLevel
-	 * @property {string} title			The name of this level
-	 * @property {string} description	The description of this level
-	 * @property {string} awardText		Text that should be shown to the user when this level is unlocked
-	 * @property {string} [badgeImage]	A download URL for a small image representing this level
-	 * @property {string} [largeImage]	A download URL for a large image representing this level*/
-	
-	/**An avatar that the player may select to represent themselves.
-	 * @memberof gamification
-	 * @typedef {Object} Avatar
-	 * @property {string} id			The ID of this avatar
-	 * @property {string} name			The default name of this avatar
-	 * @property {string} description	A description of this avatar
-	 * @property {string} [largeImage]	A download URL for a large image representing this avatar
-	 * @property {string} [markerImage]	A download URL for a small image representing this avatar*/
-	
-	/**Contains the status of the current user
-	 * @memberof gamification
-	 * @typedef {Object} Player
-	 * @param {string} name					The player's name
-	 * @param {boolean} hasAvatar			True if the player has chosen an avatar
-	 * @property {string} [largeImage]		A download URL for a large image representing the player's avatar
-	 * @property {string} [markerImage]		A download URL for a small image representing the player's  avatar
-	 * @property {Array<String>} overlays	An array of download URLs to images that should be drawn over the player's avatar*/
-	
-	
-	var BASE_URL="/o/gamification/";	
-	var PARAM_MATERIAL = "materialId";
-	
-	var enabledMaterials = {};
-	
-	/**Checks whether gamification features have been enabled for the specified product
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material to check
-	 * @return {Promise<boolean, gamification.Error>}	Resolves to true if gamification is enabled, false otherwise*/
-	function isEnabled(materialId){
-		var cacheKey = materialId || material.getCurrentMaterialId();
-		if ( enabledMaterials[cacheKey] ) {
-			return enabledMaterials[cacheKey]; 
-		} else {
-			var promise = _postWithPromise("enabled", materialId, {}, function(d, result) {
-				if (result.enabled){
-					d.resolve(true);
-				}
-				else {
-					d.resolve(false);
-				}
-			});
-			enabledMaterials[cacheKey] = promise;
-			return promise;
-		}
-	}
-	
-	/**Loads all achievements that are currently visible to the player in the specified material
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of achievements in the current material*/
-	function getAchievements(materialId){
-		return _doGetAchievements("achievements", materialId);
-	}
-	
-	/**Loads all achievements that the player has unlocked but have not yet been marked as shown. Note that this does not perform checks to see
-	 * if any new achievements have been unlocked, use {@link gamification.checkAchievements} to also check for new achievements.
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of pending achievements*/
-	function getPendingAchievements(materialId){
-		return _doGetAchievements("pending-achievements", materialId);
-	}
-	
-	/**Checks if any new achievements have been unlocked and then loads all achievements that the player has unlocked but have not yet been 
-	 * marked as shown. To load pending achievements without checking for new ones, use {@link gamification.getPendingAchievements}
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<Array<gamification.Achievement>, gamification.Error>}	Resolves to an array of pending achievements*/
-	function checkAchievements(materialId){
-		return _doGetAchievements("check-achievements", materialId);
-	}
-	
-	/**Common handler for functions that return achievements*/
-	function _doGetAchievements(action, materialId){
-		return _postAndHandleSuccess(action, materialId, {}, "achievements");
-	}
-	
-	/**Marks achievements as notified, so that they will no longer appear in the user's list of pending achievements
-	 * @memberof gamification
-	 * @param {Array<String>} achievements				An array of achievement IDs
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<undefined, gamification.Error>}	Resolves when the request has been executed*/
-	function markAchievements(achievements, materialId){
-		return _postAndHandleSuccess("mark-achievements", materialId, {achievements: achievements});
-	}
-	
-	/**Loads all avatars in the specified material
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<Array<gamification.Avatar>, gamification.Error>}	Resolves to an array of avatars in the current material*/
-	function getAvatars(materialId){
-		return _postAndHandleSuccess("avatars", materialId, {}, "avatars");
-	}
-	
-	/**Gets current player status in the specified material
-	 * @memberof gamification
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<gamification.Player, gamification.Error>}	Resolves to the current player status*/
-	function getPlayerStatus(materialId){
-		return _postAndHandleSuccess("player-status", materialId, {}, "player");
-	}
-	
-	/**Sets the player's avatar in the specified material
-	 * @memberof gamification
-	 * @param {string} name								The name that the player has chosen
-	 * @param {string} avatarId							The ID of avatar that the player has chosen
-	 * @param {string} [materialId=Current material ID]	The ID of the material
-	 * @return {Promise<undefined, gamification.Error>}	Resolves when the request has been executed*/
-	function setAvatar(name, avatarId, materialId){
-		return _postAndHandleSuccess("set-avatar", materialId, {name: name, avatar: avatarId});
-	}
-	
-	/**Posts an action, resolves the promise with a specified result field or rejects with any errors from the server
-	 * @param resultFieldName	The name of the field in the result object that should be used to resolve the promise*/
-	function _postAndHandleSuccess(action, materialId, data, resultFieldName){
-		return _postWithPromise(action, materialId, data, function(d, result) {
-			if (result.success){
-				if (resultFieldName){
-					d.resolve(result[resultFieldName]);
-				}
-				else {
-					d.resolve();
-				}
-			}
-			else {
-				d.reject(result.errors);
-			}
-		});
-	}
-	
-	/**Posts an AJAX call to the gamification endpoint and returns a promise
-	 * @param action		The name of the action that should be invoked
-	 * @param materialId	The material ID to send (default: current material ID)
-	 * @param data			The data to send
-	 * @param processor		A callback function to process the response. Receives the Deferred object of the promise as well as the server response
-	 * 						as parameters and should either reject or resolve the Deferred based on the response data.*/
-	function _postWithPromise(action, materialId, data, processor){
-		var deferred = new $.Deferred();
-		data[PARAM_MATERIAL] = materialId || material.getCurrentMaterialId();
-		utils.post(BASE_URL + action, data, function(result){
-			processor(deferred, result);
-		},
-		function(error){
-			deferred.reject([error]);
-		})
-		return deferred.promise();
-	}
-	
-	return {
-		isEnabled: isEnabled,
-		getAchievements: getAchievements,
-		getPendingAchievements: getPendingAchievements,
-		checkAchievements: checkAchievements,
-		markAchievements: markAchievements,
-		getAvatars: getAvatars,
-		getPlayerStatus: getPlayerStatus,
-		setAvatar: setAvatar
-	}
-	
-});
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/playlists', ['./utils', './material'], function(utils, material) {
-
-	/**
-	 *
-	 * Contains functions for loading and manipulating playlists.
-	 * A playlist is a named list of product pages, created by users, usually teachers.
-	 * When students view a playlist, they only see the pages in the playlist and are only
-	 * able to move back and forward in the playlist. <br><br>A 'page' in playlist can either be
-	 * an actual page of Cloubi product, file in media bank or file uploaded by the teacher.
-	 * Support for media bank and teacher uploaded files requires the Related Content API. Without
-	 * it, playlists can contain only normal pages.
-	 * <br><br>
-	 *
-	 * To use this API, load it like this:
-	 * <pre><code>
-	 * require(['fi.cloubi.frontend/playlists'], function(playlists) {
-	 * 	playlists.getPlaylists(function(lists) {
-	 * 		console.log(lists);
-	 * 	});
-	 * });
-	 * </code></pre>
-	 *
-	 * This API focuses mainly on manipulating the actual playlists. To view a playlist, coordinated
-	 * effort of this API, material.js API and the theme itself is required. It's done like this:
-	 *
-	 * <ol>
-	 * 	<li>Register a listener with <code>material.onPlaylistChange()</code> function.</li>
-	 * 	<li>Call <code>viewPlaylist(id)</code> or <code>viewPlaylistByCode(id)</code> function.</li>
-	 *  <li>Callback registered with material.onPlaylistChange will be called. Change the theme to playlist mode:
-	 *  	hide navigation and tools, show playlist title and progress indicator.</li>
-	 *  <li>To navigate the playlist, use <code>material.changeToNextPage()</code> and
-	 *  	<code>changeToPreviousPage()</code> functions. These functions should be used anyways to
-	 *  	change to next and previous page, whether in playlist mode or not.</li>
-	 *  <li>Whenever page changes (listen with material.onPageChange function), call
-	 *  	<code>getActivePlaylistStatus()</code> and update playlist progress indicator with the information returned.</li>
-	 *  <li>Close playlist mode by calling <code>closePlaylist()</code>. This will again trigger the listener
-	 *  	registed previously with <code>material.onPlaylistChange()</code>.</li>
-	 * </ol>
-	 *
-	 * So the theme must actually implement a separate playlist view mode. In this mode, normal navigation
-	 * is disabled, only the previous and next buttons are visible. Then there is some sort of playlist
-	 * progress indicator, which tells what playlist is open. Playlist mode is kinda like a separate product
-	 * with only those pages in that order.
-	 * <br><br>
-	 *
-	 * A single playlist can contain pages from multiple products, or be associated with a particular material. Students can open
-	 * playlist created by teachers (this is the whole point of playlists). If a playlist has a page that students do not have a permission
-	 * to view, that page is trimmed from the playlist when student loads it.
-	 *
-	 * @namespace playlists
-	 *
-	 **/
-
-
-
-	/* TYPE DEFINITIONS */
-
-	/**An object representing a playlist
-	 * @memberof playlists
-	 * @mixes playlists.PlaylistMeta
-	 * @typedef {Object} Playlist
-	 * @property {string} shareCode						The share code of the playlist
-	 * @property {string} shareURL						The URL to open this playlist
-	 * @property {playlists.PlaylistPage[]} pages		An array of pages in the list*/
-
-	/**A single page in a playlist
-	 * @memberof playlists
-	 * @typedef {Object} PlaylistPage
-	 * @property {string} materialId					The material ID of this playlist page
-	 * @property {string} pageId						The page ID of this playlist page
-	 * @property {string} [relatedContentId]			The related content ID of this playlist page
-	 * @property {string} [pageTitle]					Title of the page, if available is true.
-	 * @property {string} [materialTitle]				Title of the material, if available is true.
-	 * @property {string} [relatedContantTitle]			Title of the related content, if available is true.
-	 * @property {boolean} available					True, if current user still has access to this page/related content.*/
-
-
-	/**An object representing a playlist metadata.
-	 * @memberof playlists
-	 * @mixin
-	 * @typedef {Object} PlaylistMeta
-	 * @property {string} id							The ID of the playlist
-	 * @property {string} name							The name of the playlist
-	 * @property {string} description					The description of the playlist
-	 * @property {boolean} visible						If true, anyone with the code can open the playlist*/
-
-
-
-
-	/* CALLBACK DEFINITIONS */
-
-	/**A callback to receives playlists.
-	 * @memberof playlists
-	 * @callback PlaylistsCallback
-	 * @param {playlists.Playlist[]} playlists	An array containing the playlists*/
-
-	/**A callback to receive a playlist.
-	 * @memberof playlists
-	 * @callback PlaylistCallback
-	 * @param {playlists.Playlist} playlist		The playlist or null if no such playlist exists.*/
-
-	/**A callback to receive information about playlist deletion.
-	 * @memberof playlists
-	 * @callback DeleteCallback
-	 * @param {boolean} success					True, if the playlist was successfully deleted.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist'</ul>*/
-
-	/**A callback to receive information about playlist update.
-	 * @memberof playlists
-	 * @callback UpdateCallback
-	 * @param {boolean} success					True, if the playlist was successfully updated.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'cannot-associate-playlist-with-material'</ul>*/
-
-	/**A callback to receive information about playlist creation.
-	 * @memberof playlists
-	 * @callback CreateCallback
-	 * @param {boolean} success					True, if the playlist was successfully created.
-	 * @param {playlists.Playlist} [playlist]	The just created playlist.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'no-permission-to-create-playlist' <li>'failed-to-create-playlist'</ul>*/
-
-	/**A callback to receive information about adding page to a playlist.
-	 * @memberof playlists
-	 * @callback AddCallback
-	 * @param {boolean} success					True, if the page was successfully added.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-already-in-playlist' <li>'invalid-page' <li>'page-from-unassociated-material'</ul>*/
-
-	/**A callback to receive information about removing page from a playlist.
-	 * @memberof playlists
-	 * @callback RemoveCallback
-	 * @param {boolean} success					True, if the page was successfully removed.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-not-in-playlist' <li>'invalid-page'</ul>*/
-
-	/**A callback to receive information about moving a page in a playlist.
-	 * @memberof playlists
-	 * @callback SortCallback
-	 * @param {boolean} success					True, if the page was successfully moved.
-	 * @param {string[]} [errors]				Array of errors in case success if false: <ul><li>'missing-data' <li>'no-such-playlist' <li>'page-not-in-playlist' <li>'invalid-page'</ul>*/
-
-	/**A callback to be called when playlist is in view mode.
-	 * @memberof playlists
-	 * @callback ViewCallback
-	 * @param success							True of the playlist was successfully opened, false otherwise*/
-
-	/**A callback to get the playlist status.
-	 * @memberof playlists
-	 * @callback StatusCallback
-	 * @param {boolean} hasPlaylist						True, if there is an active playlist.
-	 * @param {playlists.PlaylistMeta} [playlist]		Metadata of the current playlist.
-	 * @param {number} [pageIndex]						Index of the current page in playlist. Zero means the first page.
-	 * @param {number} [pagesTotal]						Number of the pages in current playlist.
-	 * */
-
-	/**A callback to be called when playlist is closed.
-	 * @memberof playlists
-	 * @callback CloseCallback*/
-
-
-
-	/* FUNCTION IMPLEMENTATIONS */
-
-
-	/**
-	 * Get all the playlist created by current user.
-	 * @memberof playlists
-	 * @param {playlists.PlaylistsCallback} callback			A callback to receive the playlists.
-	 */
-	function getPlaylists(callback) {
-		utils.get('/o/playlists/playlists', function(response) {
-			callback(response.playlists);
-		});
-	}
-
-	/**
-	 * Get all playlists associated with the given material id.
-	 * @memberof playlists
-	 * @param {number}                     materialId           The ID of a Cloubi material.
-	 * @param {playlists.PlaylistCallback} callback             A callback to receive the playlists.
-	 */
-	function getPlaylistsForMaterial(materialId, callback) {
-		utils.get('/o/playlists/playlists?materialId=' + materialId, function(response) {
-			callback(response.playlists);
-		});
-	}
-
-	/**
-	 * Get a playlist with given id.
-	 * @memberof playlists
-	 * @param {string} playlistId								The ID of the playlist
-	 * @param {playlists.PlaylistCallback} callback				A callback to receive the playlist.
-	 */
-	function getPlaylist(playlistId, callback) {
-		doGetPlaylist(playlistId, null, false, callback);
-	}
-
-
-	/**
-	 * Get a playlist with given share code.
-	 * @memberof playlists
-	 * @param {string} code										The share code of the playlist
-	 * @param {playlists.PlaylistCallback} callback				A callback to receive the playlist.
-	 */
-	function getPlaylistByCode(code, callback) {
-		doGetPlaylist(null, code, false, callback);
-	}
-
-
-	function doGetPlaylist(playlistId, code, trimPages, callback) {
-		var data = { trim: trimPages };
-		if ( playlistId ) {
-			data.id = playlistId;
-		}
-		if ( code ) {
-			data.code = code;
-		}
-		utils.post('/o/playlists/playlist', data, function(response) {
-			callback(response.playlist ? response.playlist : null);
-		});
-	}
-
-
-
-	/**
-	 * Checks is current user is allowed to create and modify playlists. All users can
-	 * view playlists, but usually only teachers are allowed to create them.
-	 * @memberof playlists
-	 * @return {boolean}										True, if current user can create new playlists.
-	 */
-	function isAllowedToCreatePlaylists() {
-		return Cloubi.playlists.canCreatePlaylists;
-	}
-
-
-	/**
-	 * Deletes a playlist with given id.
-	 * @memberof playlists
-	 * @param {string} playlistId								The ID of the playlist to delete.
-	 * @param {playlists.DeleteCallback} callback				A callback to be called when operation is completed.
-	 */
-	function deletePlaylist(playlistId, callback) {
-		utils.post('/o/playlists/delete', {id: playlistId}, function(response) {
-			callback(response.success);
-		});
-	}
-
-
-	/**
-	 * Updates metadata of a playlist with given id.
-	 * @memberof playlists
-	 * @param {string} playlistId								The ID of the playlist to update.
-	 * @param {playlists.PlaylistMeta} data						The new metadata. The id attribute is ignored and
-	 * 															missing attributes are not updated.
-	 * @param {playlists.UpdateCallback} callback				A callback to be called when operation is completed.
-	 */
-	function updatePlaylist(playlistId, data, callback) {
-		utils.post('/o/playlists/update', {id: playlistId, data: data}, function(response) {
-			callback(response.success);
-		});
-	}
-
-
-	/**
-	 * Creates a new, empty playlist.
-	 * @memberof playlists
-	 * @param {playlists.PlaylistMeta} data						The metadata for the new playlist. The id attribute is ignored.
-	 * @param {playlists.CreateCallback} callback				A callback to be called when operation is completed.
-	 */
-	function createPlaylist(data, callback) {
-		utils.post('/o/playlists/create', data, function(response) {
-			callback(response.success, response.playlist);
-		});
-	}
-
-
-
-	/**
-	 * Adds a page to the end of existing playlist. If the page already exists in the playlist,
-	 * this function does nothing.
-	 * @memberof playlists
-	 * @param {playlists.PlaylistPage} page						The page to be added.
-	 * @param {string} playlistId								The ID of the playlist to add the page to.
-	 * @param {playlists.AddCallback} callback					A callback to be called when operation is completed.
-	 */
-	function addToPlaylist(page, playlistId, callback) {
-		utils.post('/o/playlists/add', {id: playlistId, page: page}, function(response) {
-			callback(response.success);
-		});
-	}
-
-
-	/**
-	 * Adds the current page to the end of existing playlist. If the page already exists in the playlist,
-	 * this function does nothing.
-	 * @memberof playlists
-	 * @param {string} playlistId								The ID of the playlist to add the page to.
-	 * @param {playlists.AddCallback} callback					A callback to be called when operation is completed.
-	 */
-	function addCurrentPageToPlaylist(playlistId, callback) {
-		addToPlaylist({
-			materialId: material.getCurrentMaterialId(),
-			pageId: material.getCurrentPageId()
-		}, playlistId, callback);
-	}
-
-
-
-	/**
-	 * Removes a page from existing playlist. If the page does not exists in the playlist,
-	 * this function does nothing.
-	 * @memberof playlists
-	 * @param {playlists.PlaylistPage} page						The page to be removed. This must be a page object from a playlist returned by this API.
-	 * @param {string} playlistId								The ID of the playlist to remove the page from.
-	 * @param {playlists.RemoveCallback} callback				A callback to be called when operation is completed.
-	 */
-	function removeFromPlaylist(page, playlistId, callback) {
-		utils.post('/o/playlists/remove', {id: playlistId, page: page}, function(response) {
-			callback(response.success);
-		});
-	}
-
-
-	/**
-	 * Moves a page to a new location within a playlist.
-	 * @memberof playlists
-	 * @param {playlists.PlaylistPage} page						The page to be moved. This must be a page object from a playlist returned by this API.
-	 * @param {number} index									New location, or index, for the page. Zero means the first page of the playlist.
-	 * @param {string} playlistId								The ID of the playlist.
-	 * @param {playlists.SortCallback} callback					A callback to be called when operation is completed.
-	 */
-	function sortPlaylistItem(page, index, playlistId, callback) {
-		utils.post('/o/playlists/sort', {id: playlistId, index: index, page: page}, function(response) {
-			callback(response.success);
-		});
-	}
-
-
-	/**
-	 * Opens a playlist for viewing.
-	 * @memberof playlists
-	 * @param {string} playlistId								The ID of the playlist.
-	 * @param {playlists.ViewCallback} callback					A callback to be called when playlist view mode is open.
-	 * 															Listeners registered with <code>material.onPlaylistChange()</code>
-	 * 															will be called before this.
-	 * @param {?integer} pageNumber								The number of the page to start from
-	 */
-	function viewPlaylist(playlistId, callback, pageNumber) {
-		doGetPlaylist(playlistId, null, true, function(playlist) {
-			if ( playlist ) {
-				material.setCurrentPlaylist(playlist, pageNumber);
-				callback(true);
-			}
-			else {
-				callback(false);
-			}
-		});
-	}
-
-
-	/**
-	 * Opens a playlist for viewing.
-	 * @memberof playlists
-	 * @param {string} code										The share code of the playlist
-	 * @param {playlists.ViewCallback} callback					A callback to be called when playlist view mode is open.
-	 * 															Listeners registered with <code>material.onPlaylistChange()</code>
-	 * 															will be called before this.
-	 */
-	function viewPlaylistByCode(code, callback) {
-		doGetPlaylist(null, code, true, function(playlist) {
-			if ( playlist ) {
-				material.setCurrentPlaylist(playlist);
-				callback(true);
-			}
-			else {
-				callback(false);
-			}
-		});
-	}
-
-
-	/**
-	 * Gets information about current playlist, if there is one.
-	 * @memberof playlists
-	 * @param {playlists.StatusCallback} callback					A callback to receive the status information.
-	 */
-	function getActivePlaylistStatus(callback) {
-		var current = material.getCurrentPlaylist();
-		if ( current ) {
-			var pageSource = material.getPageSource();
-			callback(true, current, pageSource.getCurrentPageIndex(), current.pages.length);
-		} else {
-			callback(false);
-		}
-	}
-
-
-	/**
-	 * Closes currently open playlist, if there is one.
-	 * @memberof playlists
-	 * @param {playlists.CloseCallback} callback					A callback to be called when playlist is closed.
-	 * 																Listeners registered with <code>material.onPlaylistChange()</code>
-	 * 																will be called before this.
-	 */
-	function closePlaylist(callback) {
-		material.setCurrentPlaylist(null);
-		callback();
-	}
-
-
-	/**
-	 * Open playlist automatically if user opened /o/open-playlist/<id> URL.
-	 */
-	material.onMaterialReady(function() {
-
-		// Do we have a playlist to automatically open?
-		if ( Cloubi.playlists.playlistId ) {
-
-			// This should prevent the playlist from being opened twice or something..
-			var id = Cloubi.playlists.playlistId;
-			Cloubi.playlists.playlistId = null;
-
-			var pageNum = Cloubi.playlists.playlistPage;
-
-			// Check if the playlist portlet is also on the page,
-			// as it will also try to automatically open the playlist.
-			if ( jQuery('#portlet_fi_cloubi_portlet_playlist_PlaylistPortlet').length == 0 ) {
-				viewPlaylist(id, function() {}, pageNum);
-			}
-
-		}
-
-	});
-
-
-	/* PUBLIC FUNCTIONS */
-
-	return {
-		getPlaylists: getPlaylists,
-		getPlaylistsForMaterial: getPlaylistsForMaterial,
-		getPlaylist: getPlaylist,
-		getPlaylistByCode: getPlaylistByCode,
-		isAllowedToCreatePlaylists: isAllowedToCreatePlaylists,
-		deletePlaylist: deletePlaylist,
-		updatePlaylist: updatePlaylist,
-		createPlaylist: createPlaylist,
-		addToPlaylist: addToPlaylist,
-		addCurrentPageToPlaylist: addCurrentPageToPlaylist,
-		removeFromPlaylist: removeFromPlaylist,
-		sortPlaylistItem: sortPlaylistItem,
-		viewPlaylist: viewPlaylist,
-		viewPlaylistByCode: viewPlaylistByCode,
-		getActivePlaylistStatus: getActivePlaylistStatus,
-		closePlaylist: closePlaylist
-	};
-
-});
-
-
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/rest-client', ['fi.cloubi.lib.js/jquery'], function (jQuery) {
-
-    function RestClient(baseUrl) {
-        this.baseUrl = baseUrl;
-    }
-
-    RestClient.prototype.trackProgress = function (trackerId, progressCallback) {
-        var self = this;
-
-        return new Promise(function (resolve, reject) {
-            self.pollForProgress(trackerId, progressCallback, resolve, reject);
-        });
-    };
-
-    RestClient.prototype.pollForProgress = function (trackerId, progressCallback, success, failure) {
-        var self = this;
-
-        setTimeout(function () {
-            self.updateProgressTracker(trackerId).then(function (progressState) {
-                if (progressCallback != null) {
-                    progressCallback(progressState.percentage, progressState.description, progressState);
-                }
-
-                if (progressState.status === 'error') {
-                    failure(progressState.description);
-                } else if (progressState.status === 'success') {
-                    success(progressState.result);
-                } else {
-                    self.pollForProgress(trackerId, progressCallback, success, failure);
-                }
-            })
-                .catch(function (error) {
-                    failure(error);
-                });
-        }, 500);
-    };
-
-    RestClient.prototype.updateProgressTracker = function (trackerId) {
-        return this.GET('progress/job/' + trackerId);
-    };
-
-    RestClient.prototype.downloadFile = function (handler, downloadId) {
-        var xhr = new XMLHttpRequest();
-        xhr.onreadystatechange = function () {
-            if (this.readyState === 4 && this.status === 200) {
-
-                var contentDisposition = this.getResponseHeader("Content-Disposition");
-                var filename = "download";
-
-                if (contentDisposition && contentDisposition.indexOf('attachment') !== -1) {
-                    var filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-                    var matches = filenameRegex.exec(contentDisposition);
-                    if (matches != null && matches[1]) {
-                        filename = matches[1].replace(/['"]/g, '');
-                    }
-                }
-
-                var url = window.URL.createObjectURL(this.response);
-                var anchor = document.createElement('a');
-
-                anchor.href = url;
-                anchor.download = filename;
-                anchor.click();
-                window.URL.revokeObjectURL(url);
-            }
-        };
-
-        xhr.open('GET', this.baseUrl + 'download/' + handler + '/' + downloadId);
-        xhr.responseType = 'blob';
-        xhr.send();
-    };
-
-    RestClient.prototype.uploadFile = function (url, files, progressTracker, optionalData) {
-        var self = this;
-
-        return new Promise(function (resolve, reject) {
-            var formData = new FormData();
-
-            if (files instanceof FileList) {
-                for (var i = 0; i < files.length; i++) {
-                    formData.append('encoded-filename', encodeURIComponent(files[i].name));
-                    formData.append('files', files[i]);
-                }
-            } else if (files instanceof File) {
-                formData.append('encoded-filename', encodeURIComponent(files.name));
-                formData.append('files', files);
-            }
-
-            if (optionalData) {
-                Object.keys(optionalData).forEach(function (key) {
-                    if (Array.isArray(optionalData[key])) {
-                        optionalData[key].forEach(function (item) {
-                            formData.append(key, item);
-                        });
-                    } else {
-                        formData.append(key, optionalData[key]);
-                    }
-                });
-            }
-
-            jQuery.ajax({
-                type: 'POST',
-                url: self.baseUrl + url,
-                cache: false,
-                contentType: false,
-                processData: false,
-                data: formData,
-                enctype: 'multipart/form-data',
-                success: function (data, status, xhr) {
-                    if (xhr.status === 202) {
-                        var trackerId = xhr.getResponseHeader('Progress-Tracker-Job-Id');
-                        self.trackProgress(trackerId, function (percentage, description) {
-                            progressTracker.progress = percentage;
-                        }).then(resolve).catch(reject);
-                    } else if (xhr.status === 200) {
-                        resolve(data);
-                    } else {
-                        reject(status);
-                    }
-                },
-                error: reject,
-                xhr: function () {
-                    var request = jQuery.ajaxSettings.xhr();
-                    if (request.upload) {
-                        request.upload.addEventListener('progress', function (event) {
-                            if (progressTracker && event.lengthComputable) {
-                                var max = event.total;
-                                var current = event.loaded;
-                                progressTracker.progress = (Math.round((current / max) * 100));
-                            }
-                        }, false);
-                    }
-                    return request;
-                }
-            });
-        });
-    };
-
-    RestClient.prototype.ajaxPromise = function (type, url, data) {
-        var self = this;
-        return new Promise(function (resolve, reject) {
-            var queryData = null;
-            if (type !== 'GET') {
-                queryData = JSON.stringify(data);
-            }
-
-            jQuery.ajax({
-                type: type,
-                url: self.baseUrl + url,
-                data: queryData,
-                contentType: 'application/json; charset=utf-8',
-                success: function (data, status, xhr) {
-                    if (xhr.status === 202) {
-                        resolve(xhr.getResponseHeader('Progress-Tracker-Job-Id'));
-                    } else {
-                        var contentDisposition = xhr.getResponseHeader('Content-Disposition');
-                        var contentType = xhr.getResponseHeader('Content-Type');
-                        if (contentDisposition) {
-                            resolve({
-                                "data": data,
-                                "contentDisposition": contentDisposition,
-                                "contentType": contentType
-                            });
-                        } else {
-                            resolve(data);
-                        }
-                    }
-                },
-                error: reject
-            });
-        });
-    };
-
-    RestClient.prototype.GET = function (url, data) {
-        if (data) {
-            var query = "?";
-            query += Object.entries(data)
-            .filter(function(pair) { return pair[1] !== undefined; })
-            .map(function(pair) {
-                if (Array.isArray(pair[1])) {
-                    return pair[1]
-                    .filter(function(value) { return value !== undefined; })
-                    .map(function(value) {
-                        return encodeURIComponent(pair[0]) + "=" + encodeURIComponent(value);
-                    }).join("&")
-                }
-                return encodeURIComponent(pair[0]) + "=" + encodeURIComponent(pair[1]);
-            }).join("&");
-            url += query;
-        }
-        return this.ajaxPromise('GET', url, null);
-  };
-
-  RestClient.prototype.POST = function (url, data) {
-    return this.ajaxPromise('POST', url, data);
-  };
-
-  RestClient.prototype.DELETE = function (url, data) {
-    return this.ajaxPromise('DELETE', url, data);
-  };
-
-  return RestClient;
-});
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/additional-content', ['./utils', './material'], function(utils, material) {
-	
-	/**Contains functions for listing and accessing additional content for material pages. To use this API, load it like this:
-	 
-	 <pre><code>
-	require(['fi.cloubi.frontend/additional-content'], function(ac) {
-		ac.getContents(function(response) {
-			console.log(response);
-		});
-	});
-	 </code></pre>
-	 
-	 Usage:<br><br>
-	 Calling getContents() will return a response with several objects: a files object with all the {@link additionalcontent.Content} files
-	 on the page and two content folders (generally displayed as tabs). Each folder has a list of file IDs inside that folder - these are the
-	 contents that should be displayed when that folder/tab is selected. Each file may be a folder containing files itself, in which case the
-	 IDs are included in that file's additionalContent array. Note that these references may be cyclical (a file may indirectly contain itself),
-	 so the entire folder structure should never be displayed at once.<br>
-	 Files with the popupRenderable flag set to true can be loaded inline into Cloubi by loading the file's contentUrl and inserting the response
-	 HTML into the DOM. Note that when doing this, any script tags in the response MUST be preserved and executed, such as when using jQuery.load().
-	 If a file has a contentUrl but it is not popupRenderable, the contentUrl should be treated as an external link that should be opened 
-	 in a new tab when the file is opened. If a file has the downloadable flag set to true, it can be downloaded by calling getDownloadLink()
-	 with its ID and then opening the response URL as a download link.
-	 <br><br>
-	 
-	 Playlist integration:<br><br>
-	 When the page has loaded, any additional content UI should check if Cloubi.additionalContent.initialContent exists and if so,
-	 attempt to display that content. Note that the content may be some other user's user content that is not included in the list of
-	 all contents received from getContents(), in which case it must be loaded separately with getSingleContent().
-	 <br><br>
-	 To get notified when a playlist changes to an additional content item, listen to page changes like this:
-	 <pre><code>
-	 material.onPageChange(function (page, options, data){
-		//If the page change data has a related content ID, show the related content with that ID
-		if (data.relatedContentId){
-			ac.getSingleContent(data.relatedContentId, data.playlistId, function(response){
-				if (response.success){
-					var contentData = response.files[data.relatedContentId];
-					//Display the content represented by contentData here
-				}
-			});
-		}
-	 });
-	 </code></pre>
-	 
-	 * @namespace additionalcontent */
-	
-	/**Represents an individual piece of additional content
-	 * @memberof additionalcontent
-	 * @typedef {Object} Content
-	 * @property {string[]} additionalContent	An array containing the IDs of any sub-content nested inside this content
-	 * @property {string} contentType			The MIME content type of this content
-	 * @property {string} [contentUrl]			An URL that can be loaded to render the file contents of this content inside Cloubi
-	 * @property {string} description			The description of the content
-	 * @property {boolean} editable				If true, the user can edit the title of this file
-	 * @property {string} id					The unique ID of this content
-	 * @property {boolean} playlistEnabled		If true, the user can add this content to a playlist
-	 * @property {boolean} popupRenderable		True if this content can be rendered by loading the content URL in a modal dialog
-	 * @property {string} title					The name of this file
-	 * @property {string} typeName				The human-readable name of this file's data type
-	 * @property {boolean} downloadable			If true, this content can be downloaded by getting the download URL with {@link additionalcontent.getDownloadLink}*/
-	
-	/**Represents a root content folder
-	 * @memberof additionalcontent
-	 * @typedef {Object} ContentFolder
-	 * @property {string[]} additionalContent	An array containing the IDs of any content contained inside this folder
-	 * @property {boolean} canAdd				True if the user can upload files into this content folder
-	 * @property {number} [maxSize]				The maximum size of files (in bytes) that can be uploaded into this folder if 
-	 * 											this folder supports uploading*/
-	
-	/**A server response object
-	 * @memberof additionalcontent
-	 * @mixin
-	 * @typedef {Object} Response
-	 * @property {boolean} success		True if the request was successful
-	 * @property {string[]} [errors]	An array of errors that were encountered while processing the request*/
-	
-	/**A callback that receives all content on a page
-	 * @memberof additionalcontent
-	 * @callback AllContentCallback
-	 * @param {additionalcontent.Response} response							The server response
-	 * @param {Object.<string, additionalcontent.Content>} [response.files]	An object mapping content IDs to Content objects
-	 * @param {additionalcontent.ContentFolder} [response.libraryFiles]		The library additional content on the page
-	 * @param {additionalcontent.ContentFolder} [response.userFiles]		The user additional content on the page*/
-	
-	/**A callback that receives content that was specifically requested
-	 * @memberof additionalcontent
-	 * @callback ContentCallback
-	 * @param {additionalcontent.Response} response							The server response
-	 * @param {Object.<string, additionalcontent.Content>} [response.files]	An object mapping content IDs to Content objects*/
-	
-	/**A callback that receives a content download URL
-	 * @memberof additionalcontent
-	 * @callback URLCallback
-	 * @param {additionalcontent.Response} response		The server response
-	 * @param {string} [response.downloadUrl]			The requested URL*/
-	
-	/**A generic callback that receives information about an operation's success or failure
-	 * @memberof additionalcontent
-	 * @callback GenericCallback
-	 * @param {additionalcontent.Response} response	The server response*/
-	
-	/**The native JS File type
-	 * @external File
-	 * @see {@link https://developer.mozilla.org/en-US/docs/Web/API/File|File}*/
-	
-	/**Servlet address*/
-	var ENDPOINT = "/o/related-content/";
-	/**Material ID parameter*/
-	var PARAM_MATERIAL_ID = "materialId";
-	/**Page ID parameter*/
-	var PARAM_PAGE_ID = "pageId";
-	/**Content ID parameter*/
-	var PARAM_CONTENT_ID = "fileId";
-	/**Playlist ID parameter*/
-	var PARAM_PLAYLIST_ID = "playlistId";
-	/**File name parameter*/
-	var PARAM_FILENAME = "fileName";
-	
-	/**Loads all additional content for a given material page.
-	 * <br>Can produce the following errors:
-	 * <ul>
-	 * <li><b>no-such-material</b> if the requested material ID does not match any available material
-	 * <li><b>no-such-page</b> if the requested page ID does not match any valid page
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {additionalcontent.AllContentCallback} [callback]	A callback to receive the data
-	 * @param {string} [requestedMaterial=current material id]	The requested material ID of the material containing the page
-	 * @param {string} [pageId=current page id]					The ID of the page whose additional content should be retrieved*/
-	function getContents(callback, requestedMaterial, pageId){
-		var data = {};
-		data[PARAM_MATERIAL_ID] = requestedMaterial || material.getRequestedMaterial();
-		data[PARAM_PAGE_ID] = pageId || material.getCurrentPageId();
-		utils.post(ENDPOINT + "contents", data, callback);
-	}
-	
-	/**Gets the data of an individual additional content file.
-	 * <br>Can produce the following errors:
-	 * <ul>
-	 * <li><b>content-not-available</b> if the requested content ID does not match any available content
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {string} contentId								The ID of the content to get
-	 * @param {string} [playlistId]								The ID of the currently active playlist if any
-	 * @param {additionalcontent.ContentCallback} [callback]	A callback to receive the result*/
-	function getSingleContent(contentId, playlistId, callback){
-		var data = {};
-		data[PARAM_CONTENT_ID] = contentId;
-		data[PARAM_PLAYLIST_ID] = playlistId;
-		utils.post(ENDPOINT + "content", data, callback);
-	}
-	
-	/**Uploads a file to the userFiles additional content folder.
-	 * <br>Can produce the following errors:
-	 * <ul>
-	 * <li><b>invalid-upload</b> if the sent file was not successfully received by the server
-	 * <li><b>upload-not-permitted</b> if the user is not allowed to upload additional content files
-	 * <li><b>upload-failed</b> if the file was received but could not be saved
-	 * <li><b>invalid-upload</b> if the sent file was not successfully received by the server
-	 * <li><b>file-too-large</b> if the sent file was larger than the server allows
-	 * <li><b>no-such-material</b> if the requested material ID does not match any available material
-	 * <li><b>no-such-page</b> if the requested page ID does not match any valid page
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {external:File} file	The file to upload
-	 * @param {string} [name=file.name]														A custom file name for the file
-	 * @param {additionalcontent.GenericCallback} [callback]								A callback to handle the server response
-	 * @param {number} [materialId=current material ID]										The ID of the material to contain the content
-	 * @param {string} [pageId=current page ID]												The ID of the page to contain the content*/
-	function uploadUserFile(file, name, callback, materialId, pageId){
-		var data = {};
-		data[PARAM_MATERIAL_ID] = materialId || material.getCurrentMaterialId();
-		data[PARAM_PAGE_ID] = pageId || material.getCurrentPageId();
-		data[PARAM_FILENAME] = name || file.name;
-		utils.upload(ENDPOINT + "add-file", data, file, callback);
-	}
-	
-	/**Deletes a user-uploaded additional content file.
-	 * <br>Can produce the following errors:
-	 * <ul>
-	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {string} contentId								The ID of the file to delete
-	 * @param {additionalcontent.GenericCallback} [callback]	A callback to handle the server response*/
-	function deleteUserFile(contentId, callback){
-		var data = {};
-		data[PARAM_CONTENT_ID] = contentId;
-		utils.post(ENDPOINT + "delete-file", data, callback);
-	}
-	
-	/**Renames a user-uploaded additional content file.
-	 * C<br>an produce the following errors:
-	 * <ul>
-	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to rename it
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {string} contentId								The ID of the file to delete
-	 * @param {string} name										The new name of the file
-	 * @param {additionalcontent.GenericCallback} [callback]	A callback to handle the server response*/
-	function renameUserFile(contentId, name, callback){
-		var data = {};
-		data[PARAM_CONTENT_ID] = contentId;
-		data[PARAM_FILENAME] = name;
-		utils.post(ENDPOINT + "rename-file", data, callback);
-	}
-	
-	/**Gets a download link to an additional content file. This should only be called immediately before starting the download, as
-	 * the URL may expire over time.
-	 * <br>Can produce the following errors:
-	 * <ul>
-	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
-	 * <li><b>content-not-available</b> if the requested content ID does not match any available content or the user is not allowed to delete it
-	 * </ul>
-	 * @memberof additionalcontent
-	 * @param {string} contentId								The ID of the file to delete
-	 * @param {string} [playlistId]								The ID of the current playlist (if any). Required to download other users' user
-	 * 															content from playlists.
-	 * @param {additionalcontent.URLCallback} [callback]		A callback to handle the server response*/
-	function getDownloadLink(contentId, playlistId, callback){
-		var data = {};
-		data[PARAM_CONTENT_ID] = contentId;
-		data[PARAM_PLAYLIST_ID] = playlistId;
-		utils.post(ENDPOINT + "download-link", data, callback);
-	}
-	
-	return {
-		getContents: getContents,
-		getSingleContent: getSingleContent,
-		uploadUserFile: uploadUserFile,
-		deleteUserFile: deleteUserFile,
-		renameUserFile: renameUserFile,
-		getDownloadLink: getDownloadLink
-	};
-});
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/adaptivity', ['./utils', './material'], function(utils, material) {
-
-	/**
-	 Contains functions for interacting with Cloubi's adaptivity features such as task packages.
-	 <br><br>
-	 These function are intended to be used within materials. If used outside materials, make sure to always manually provide material and page IDs.
-	 <br><br>
-
-	 To use this API, load it like this:
-
-	 <pre><code>
-	require(['fi.cloubi.frontend/adaptivity'], function(adaptivity) {
-		adaptivity.getCurrentTaskPackagePage(function(response) {
-			console.log(response);
-		});
-	});
-	 </code></pre>
-
-	 * @namespace adaptivity */
-
-	/**Represents the current state of a task package
-	 * @memberof adaptivity
-	 * @typedef {object} TaskPackageState
-	 * @property {string} [pageId]			The ID of the page that should be shown to the user
-	 * @property {string} [url]				A URL that can be used to load the contents of the page
-	 * @property {boolean} canSkip			True if the user can skip ahead and load the next page without finishing the current one
-	 * @property {boolean} canReverse		True if the user can go backwards in the task package
-	 * @property {boolean} canReset			True if the user is currently allowed to reset their progress in the task package
-	 * @property {boolean} hasNext			True if there are more pages in the package after the current one
-	 * @property {number} currentSection	The number of the task package section that the user is in
-	 * @property {number} sectionCount		The total number of sections in this package
-	 * @property {string} strategyId 		The selected strategy ID
-	 * @property {number} [currentLevel]	The user's current level
-	 * @property {object} [strategyConfig]	The selected strategy's config*/
-
-
-	/**Represents a keycard that can be used to access locked parts of the material
-	 * @memberof adaptivity
-	 * @typedef {object} Keycard
-	 * @property {number} id			The ID of the keycard
-	 * @property {string} name			The name of the keycard
-	 * @property {string} description	The description of the keycard
-	 * @property {string} imageUrl		An URL that can be used to show an image representing this keycard
-	 * @property {boolean} owned		true if the current user has this keycard, false otherwise*/
-
-	/**A server response object
-	 * @memberof adaptivity
-	 * @mixin
-	 * @typedef {Object} Response
-	 * @property {boolean} success		True if the request was successful
-	 * @property {string[]} [errors]	An array of errors that were encountered while processing the request*/
-
-	/**A generic callback that receives information about an operation's success or failure
-	 * @memberof adaptivity
-	 * @callback GenericCallback
-	 * @param {adaptivity.Response} response	The server response*/
-
-	/**A callback that receives information about a task package's state
-	 * @memberof adaptivity
-	 * @callback TaskStateCallback
-	 * @param {adaptivity.Response} response					The server response
-	 * @param {adaptivity.TaskPackageState} [response.state]	The current task package state*/
-
-	/**A callback that receives information about the user's keycards
-	 * @memberof adaptivity
-	 * @callback KeycardsCallback
-	 * @param {adaptivity.Response} response				The server response
-	 * @param {adaptivity.Keycard[]} [response.keycards]	An array of keycards*/
-
-	/**A callback that receives information about the user's keycards as well as a list of pages affected by those keycards
-	 * @memberof adaptivity
-	 * @callback PendingKeycardsCallback
-	 * @param {adaptivity.Response} response							The server response
-	 * @param {adaptivity.Keycard[]} [response.keycards]				An array of keycards
-	 * @param {Object.<number, material.LockAndReason>} affectedPages	An object mapping IDs of affected pages to their current lock states*/
-
-	/**Material ID request parameter*/
-	var PARAM_MATERIAL = "materialId";
-	/**Page ID request parameter*/
-	var PARAM_PAGE = "pageId";
-
-	var PARAM_KEYCARDS = "keycards";
-
-	var PARAM_AFFECTED_PAGES = "affectedPages";
-	var PARAM_LOCK_STATE = "lockState";
-	var PARAM_LOCK_REASONS = "lockReasons";
-
-	/**Task package servlet endpoint*/
-	var TASK_PACKAGE_ENDPOINT = "/o/adaptive-task-package/";
-
-	var KEYCARDS_ENDPOINT = "/o/adaptivity-keycards/"
-
-	/**ID of currently active task package page*/
-	var currentTaskPage = null;
-	/**Page ID of last active task package*/
-	var activePackage = null;
-	/**Callbacks for finished tasks*/
-	var taskDoneListeners = [];
-	/**Callbacks for next task package page request*/
-	var requestChangeToNextTaskPackagePageListeners = [];
-	/**Callbacks for previous task package page request*/
-	var requestChangeToPreviousTaskPackagePageListeners = [];
-
-	material.onPageChange(function(page){
-		if (page.id !== activePackage){
-			//Reset visible task
-			currentTaskPage = null;
-			//remove any single-page callbacks
-			taskDoneListeners = taskDoneListeners.filter(function(listener){
-				return !listener.cleanOnPageChange;
-			});
-			requestChangeToNextTaskPackagePageListeners = requestChangeToNextTaskPackagePageListeners.filter(function(listener){
-				return !listener.cleanOnPageChange;
-			});
-			requestChangeToPreviousTaskPackagePageListeners = requestChangeToPreviousTaskPackagePageListeners.filter(function(listener){
-				return !listener.cleanOnPageChange;
-			});
-		}
-	});
-	//Listen to score updates
-	material.onPageUpdated(function(page){
-		//Don't do anything unless a task package page is currently visible
-		if (currentTaskPage){
-			//If the page is done, invoke listeners
-			if (currentTaskPage === page.id && (page.scores.progress === 1 || page.scores.scoreMax === 0)){
-				$.each(taskDoneListeners, function(index, listener){
-					listener(page);
-				});
-			}
-			//If the page is the package page, get up-to-date scores for the currently visible task
-			else if (page.id === material.getCurrentPageId()){
-				material.getPage(currentTaskPage, function(taskPage){
-					material.refreshPageScores(taskPage);
-				});
-			}
-		}
-	});
-
-	/**Registers a callback to be invoked whenever the user finishes a task package page or this API is used to load a task package page
-	 * that contains no unfinished tasks.
-	 * @memberof adaptivity
-	 * @param {material.pageCallback} callback	The callback to invoke. Receives the page object of the finished task package page.
-	 * @param {boolean} [cleanOnPageChange]		If true, the callback will be unregistered when the user navigates to a different material page*/
-	function onTaskPackageTaskFinished(callback, cleanOnPageChange){
-		callback.cleanOnPageChange = cleanOnPageChange;
-		taskDoneListeners.push(callback);
-	}
-
-	/**Gets the page ID of the last task package page loaded through this API
-	 * @memberof adaptivity
-	 * @return {?string} The currently active task package page or null if no task package page has been loaded on the current material page*/
-	function getCurrentTaskPackagePageId(){
-		return currentTaskPage;
-	}
-
-	/**Loads the next page from the task package.
-	 * Causes the error "invalid-page" if the specified page is not an adaptive task package page.
-	 * @memberof adaptivity
-	 * @param {adaptivity.TaskStateCallback} callback	A callback to receive the task package state after moving to the next page
-	 * @param {string} [requestedMaterial]				The requested material ID of the material containing the page (default: current material)
-	 * @param {string} [pageId]							The page ID of the task package page (default: current page ID)*/
-	function getNextTaskPackagePage(callback, requestedMaterial, pageId){
-		taskPackageAction("getNext", callback, requestedMaterial, pageId);
-	}
-
-	/**Loads the current page from the task package.
-	 * Causes the error "invalid-page" if the specified page is not an adaptive task package page.
-	 * @memberof adaptivity
-	 * @param {adaptivity.TaskStateCallback} callback	A callback to receive the task package state
-	 * @param {string} [requestedMaterial]				The requested material ID of the material containing the page (default: current material)
-	 * @param {string} [pageId]							The page ID of the task package page (default: current page ID)*/
-	function getCurrentTaskPackagePage(callback, requestedMaterial, pageId){
-		taskPackageAction("getCurrent", callback, requestedMaterial, pageId);
-	}
-	/**Loads the previous page from the task package.
-	 * Causes the error "invalid-page" if the specified page is not an adaptive task package page.
-	 * @memberof adaptivity
-	 * @param {adaptivity.TaskStateCallback} callback	A callback to receive the task package state
-	 * @param {string} [requestedMaterial]				The requested material ID of the material containing the page (default: current material)
-	 * @param {string} [pageId]							The page ID of the task package page (default: current page ID)*/
-	function getPreviousTaskPackagePage(callback, requestedMaterial, pageId){
-		taskPackageAction("getPrevious", callback, requestedMaterial, pageId);
-	}
-	/**Resets the user's progress in a task package.
-	 * Causes the error "invalid-page" if the specified page is not an adaptive task package page.
-	 * @memberof adaptivity
-	 * @param {adaptivity.GenericCallback} callback		A callback to invoke after the package has been reset
-	 * @param {string} [requestedMaterial]				The requested material ID of the material containing the page (default: current material)
-	 * @param {string} [pageId]							The page ID of the task package page (default: current page ID)*/
-	function resetTaskPackage(callback, requestedMaterial, pageId){
-		taskPackageAction("reset", function(response){
-			pageId = pageId || material.getCurrentPageId();
-			material.getPage(pageId, function(page){
-				function refreshChildrenRecursively(parentPage) {
-					parentPage.childPages.forEach(function(childPageId) {
-						material.getPage(childPageId, function(childPage) { 
-							material.refreshPageScores(childPage);
-							refreshChildrenRecursively(childPage);
-						});
-
-					});
-				}
-				refreshChildrenRecursively(page);
-			});
-			if (callback) {
-				callback(response);
-			}
-		}, requestedMaterial, pageId);
-	}
-
-	/**Sends a request to the task package JSON API
-	 * @param {string} action							The action name to append to the base servlet URL
-	 * @param {adaptivity.TaskStateCallback} callback	A callback to handle the response
-	 * @param {string} [requestedMaterial]				The requested material ID of the material containing the page (default: current material)
-	 * @param {string} [pageId]							The page ID of the task package page (default: current page ID)*/
-	function taskPackageAction(action, callback, requestedMaterial, pageId){
-		var params = {}
-		params[PARAM_MATERIAL] = requestedMaterial || material.getRequestedMaterial();
-		params[PARAM_PAGE] = pageId || material.getCurrentPageId();
-		activePackage = params[PARAM_PAGE];
-
-		//Send request
-		utils.post(TASK_PACKAGE_ENDPOINT + action, params, function(response){
-			//If the response has a package state, set the response page as the current task package page
-			if (response.state && response.state.pageId){
-				currentTaskPage = response.state.pageId;
-				callback(response);
-			}
-			else {
-				callback(response);
-			}
-			//Refresh package page scores to update task package progress
-			material.getPage(params[PARAM_PAGE], function(page){
-				material.refreshPageScores(page);
-			});
-		});
-	}
-
-	/**Gets a list of all keycards in a material
-	 * @memberof adaptivity
-	 * @param {adaptivity.KeycardsCallback} [callback]	A callback to receive the keycards
-	 * @param {number} [materialId=current material ID]	The ID of the material whose keycards should be retrieved*/
-	function getAllKeycards(callback, materialId){
-		keycardsAction('allKeycards', callback, materialId);
-	}
-
-	/**Gets a list of all keycards that the user has in a material
-	 * @memberof adaptivity
-	 * @param {adaptivity.KeycardsCallback} [callback]	A callback to receive the keycards
-	 * @param {number} [materialId=current material ID]	The ID of the material whose keycards should be retrieved*/
-	function getOwnedKeycards(callback, materialId){
-		keycardsAction('ownedKeycards', callback, materialId);
-	}
-
-	/**Gets a list of all keycards in a material that have not yet been presented to the user
-	 * @memberof adaptivity
-	 * @param {adaptivity.PendingKeycardsCallback} callback	A callback to receive the keycards
-	 * @param {object} [options]							An object containing extra options
-	 * @param {boolean} [options.autoUpdatePageState=true]	If true, this function will automatically update page state to reflect any changes to lock status
-	 * @param {boolean} [options.autoNotify=true]			If true, this function will automatically call markKeycards for all received keycards
-	 * @param {number} [materialId=current material ID]		The ID of the material whose keycards should be retrieved*/
-	function getPendingKeycards(callback, options, materialId){
-		options = $.extend({
-			autoUpdatePageState: true,
-			autoNotify: true
-		}, options);
-		keycardsAction('pendingKeycards', function(response){
-			if (response.success){
-				if (options.autoUpdatePageState && response[PARAM_AFFECTED_PAGES]) {
-					$.each(response[PARAM_AFFECTED_PAGES], function(id, state) {
-						material.updatePageLockState(id, state[PARAM_LOCK_STATE], state[PARAM_LOCK_REASONS]);
-					});
-				}
-				if (options.autoNotify && response[PARAM_KEYCARDS] && response[PARAM_KEYCARDS].length > 0) {
-					markKeycards( response[PARAM_KEYCARDS].map(function (kc){
-						return kc.id;
-					}) );
-				}
-			}
-			if (callback) {
-				callback(response);
-			}
-		}, materialId);
-	}
-
-	/**Sends a request to the keycards API
-	 * @param {string} action								The action URL parameter of the request
-	 * @param {function} [callback]							A callback to handle the response
-	 * @param {number} [materialId=current material ID]		The ID of the material*/
-	function keycardsAction(action, callback, materialId){
-		var params = {}
-		params[PARAM_MATERIAL] = materialId || material.getCurrentMaterialId();
-
-		utils.post(KEYCARDS_ENDPOINT + action, params, function(response){
-			if (callback) {
-				callback(response);
-			}
-		});
-	}
-
-	/**Marks keycards as notified. Notified keycards will not be fetched with getPendingKeycards.
-	 * @memberof adaptivity
-	 * @param {number[]} ids							The IDs of the keycards to mark as notified
-	 * @param {adaptivity.GenericCallback} callback		A callback to invoke after the keycards have been marked*/
-	function markKeycards(ids, callback){
-		var params = {}
-		params[PARAM_KEYCARDS] = ids;
-
-		utils.post(KEYCARDS_ENDPOINT + "markKeycards", params, function(response){
-			if (callback) {
-				callback(response);
-			}
-		});
-	}
-
-	/**Registers a callback to be invoked whenever some component calls requestChangeToNextTaskPackagePage method
-	 * @memberof adaptivity
-	 * @param {function} callback	The callback to invoke.
-	 * @param {boolean} [cleanOnPageChange]		If true, the callback will be unregistered when the user navigates to a different material page*/
-	function onRequestChangeToNextTaskPackagePage(callback, cleanOnPageChange){
-		callback.cleanOnPageChange = cleanOnPageChange;
-		requestChangeToNextTaskPackagePageListeners.push(callback);
-	}
-
-	/**Registers a callback to be invoked whenever some component calls requestChangeToPreviousTaskPackagePage method
-	 * @memberof adaptivity
-	 * @param {function} callback	The callback to invoke.
-	 * @param {boolean} [cleanOnPageChange]		If true, the callback will be unregistered when the user navigates to a different material page*/
-	function onRequestChangeToPreviousTaskPackagePage(callback, cleanOnPageChange){
-		callback.cleanOnPageChange = cleanOnPageChange;
-		requestChangeToPreviousTaskPackagePageListeners.push(callback);
-	}
-
-	/**Components outside of adaptive tasks package's user interface can request moving to next page.
-	 * It's up to user interface implementation if it wants to support this by registering listener with onRequestChangeToNextTaskPackagePage
-	 * @memberof adaptivity
-	 */
-	function requestChangeToNextTaskPackagePage() {
-		$.each(requestChangeToNextTaskPackagePageListeners, function(index, listener){
-			listener();
-		});
-	}
-
-	/**Components outside of adaptive tasks packages user interface can request moving to previous page.
-	 * It's up to user interface implementation if it wants to support this by registering listener with onRequestChangeToPreviousTaskPackagePage
-	 * @memberof adaptivity
-	 */
-	function requestChangeToPreviousTaskPackagePage() {
-		$.each(requestChangeToPreviousTaskPackagePageListeners, function(index, listener){
-			listener();
-		});
-	}
-
-	return {
-		onTaskPackageTaskFinished: onTaskPackageTaskFinished,
-		getNextTaskPackagePage: getNextTaskPackagePage,
-		getCurrentTaskPackagePage: getCurrentTaskPackagePage,
-		getPreviousTaskPackagePage: getPreviousTaskPackagePage,
-		resetTaskPackage: resetTaskPackage,
-		getCurrentTaskPackagePageId: getCurrentTaskPackagePageId,
-		onRequestChangeToNextTaskPackagePage: onRequestChangeToNextTaskPackagePage,
-		onRequestChangeToPreviousTaskPackagePage: onRequestChangeToPreviousTaskPackagePage,
-		requestChangeToNextTaskPackagePage: requestChangeToNextTaskPackagePage,
-		requestChangeToPreviousTaskPackagePage: requestChangeToPreviousTaskPackagePage,
-		getAllKeycards: getAllKeycards,
-		getOwnedKeycards: getOwnedKeycards,
-		getPendingKeycards: getPendingKeycards,
-		markKeycards: markKeycards
-	}
-});
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/dialog', ['./utils'], function(utils) {
-
-	var dialogMap = {};
-	var resizeListenerCreated = false;
-
-	function postActionAndPollUntilReady(dialog, actionUrl, pollUrl, data, callback) {
-
-		callback = callback || utils.reload;
-
-		loading(dialog);
-
-		utils.post(actionUrl, data, function() {
-
-			utils.pollUntilReady(pollUrl, callback, function(progressInformation) {
-
-				loadingStatus(dialog, progressInformation);
-
-			});
-
-		});
-
-	}
-
-	function loading(dialog, keep) {
-
-		dialog = resolveDialog(dialog);
-
-		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
-
-		dialog.dialog.find('.cloubi-modal-dialog-footer input').attr("disabled", "disabled");
-
-		if ( keep ) {
-			dialog.dialog.find('.cloubi-modal-dialog-content').hide();
-			dialog.dialog.find('.cloubi-modal-dialog-content-wrapper').append(loadingAnimation);
-		} else {
-			dialog.dialog.find('.cloubi-modal-dialog-content').empty().append(loadingAnimation);
-		}
-
-	}
-
-	function removeLoading(dialog) {
-
-		dialog = resolveDialog(dialog);
-
-		dialog.dialog.find('.cloubi-modal-dialog-footer input').removeAttr("disabled");
-
-		dialog.dialog.find('.cloubi-modal-dialog-content').show();
-
-		dialog.dialog.find('.cloubi-modal-dialog-loading-animation').remove();
-
-	}
-
-	function loadingStatus(dialog, data) {
-
-		dialog = resolveDialog(dialog);
-
-		var statusText = dialog.dialog.find(".cloubi-modal-dialog-status-text");
-
-		if ( statusText.length == 0 ) {
-
-			statusText = jQuery('<div class="cloubi-modal-dialog-status-text"></div>');
-
-			dialog.dialog.find('.cloubi-modal-dialog-content').append(statusText);
-
-		}
-
-		var text = "";
-
-		if ( data.percent ) {
-			text = data.percent + "% " + Liferay.Language.get('cloubi-dialog-percent-complete');
-		} else {
-			text = Liferay.Language.get('cloubi-dialog-job-is-running');
-		}
-
-		statusText.text(text);
-
-	}
-
-	function clearFooter(dialog) {
-
-		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
-
-		footer.empty();
-
-	}
-
-	function createButton(dialog, callback, text, extraClass, saveDisabled) {
-
-		var button = jQuery('<input type="button" class="btn btn-primary" value="" />');
-
-		if ( extraClass ) {
-			button.addClass(extraClass);
-		}
-
-		button.attr("value", text);
-
-		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
-
-		if ( callback ) {
-			button.click(function() {
-				callback(dialog);
-			});
-		}
-
-		footer.append(button);
-
-		if ( text === Liferay.Language.get('cloubi-dialog-save') && saveDisabled ) {
-			setSaveEnabled(dialog, false);
-		}
-
-	}
-
-	function createButtons(dialog, callback, saveText, cancelText, saveDisabled) {
-
-		clearFooter(dialog);
-
-		createButton(dialog, callback, saveText, "save-button", saveDisabled);
-
-		createButton(dialog, function() {
-			closeDialog(dialog);
-		}, cancelText, "cancel-button");
-
-	}
-
-	function closeDialog(dialog) {
-
-		dialog = resolveDialog(dialog);
-
-		if ( dialog.closeCallback ) {
-			dialog.closeCallback();
-		}
-
-		dialog.curtain.remove();
-
-		dialogMap[dialog.name] = null;
-
-	}
-
-	function resolveDialog(dialog) {
-
-		if ( jQuery.type(dialog) === "string" ) {
-			return dialogMap[dialog];
-		} else {
-			return dialog;
-		}
-
-	}
-
-	function getDialog(name) {
-
-		return dialogMap[name];
-
-	}
-
-	function setDialogHeader(dialog, title) {
-
-		if ( title ) {
-
-			var header = dialog.dialog.find(".cloubi-modal-dialog-header");
-
-			header.text(title);
-
-		}
-
-	}
-
-	function saveOnly(dialog, callback, title, saveDisabled) {
-
-		dialog = resolveDialog(dialog);
-
-		clearFooter(dialog);
-
-		createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-save'), "save-button", saveDisabled);
-
-		setDialogHeader(dialog, title);
-
-	}
-
-	function saveAndCancel(dialog, callback, title, saveDisabled) {
-
-		dialog = resolveDialog(dialog);
-
-		createButtons(dialog, callback,
-				Liferay.Language.get('cloubi-dialog-save'),
-				Liferay.Language.get('cloubi-dialog-cancel'), saveDisabled);
-
-		setDialogHeader(dialog, title);
-
-	}
-
-	function setSaveEnabled(dialog, enabled) {
-
-		dialog = resolveDialog(dialog);
-
-		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
-		var button = footer.find(".save-button");
-
-		button.prop( "disabled", !enabled );
-
-	}
-
-	function yesAndNo(dialog, callback, title) {
-
-		dialog = resolveDialog(dialog);
-
-		createButtons(dialog, callback,
-				Liferay.Language.get('cloubi-dialog-yes'),
-				Liferay.Language.get('cloubi-dialog-no'));
-
-		setDialogHeader(dialog, title);
-
-	}
-
-	function closeOnly(dialog, title, callback) {
-
-		dialog = resolveDialog(dialog);
-
-		clearFooter(dialog);
-
-		if ( callback ) {
-			createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-close'));
-		} else {
-			createButton(dialog, function() {
-				dialog.curtain.remove();
-			}, Liferay.Language.get('cloubi-dialog-close'));
-		}
-
-		setDialogHeader(dialog, title);
-
-	}
-
-	/** Creates a dialog with a save button and a cross button that closes the dialog without saving
-	 * dialog 	A string identifying the dialog
-	 * callback	The callback function that is called when the dialog is saved
-	 * title	The title of the dialog
-	 * Any functions pushed to the dialog's closeListeners array will be executed when the dialog is closed with the cross button*/
-	function saveAndCross(dialog, callback, title) {
-
-		dialog = resolveDialog(dialog);
-
-		clearFooter(dialog);
-
-		createButton(dialog, callback, Liferay.Language.get('cloubi-dialog-save'), 'save-button');
-
-		setDialogHeader(dialog, title);
-
-		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
-
-		cross.click( function() {
-			//Call the close listeners and then close the dialog
-			if (dialog.closeListeners && dialog.closeListeners.forEach){
-				dialog.closeListeners.forEach(function (elem){
-					elem();
-				});
-			}
-			dialog.curtain.remove();
-		});
-
-		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
-
-		header.append(cross);
-
-	}
-	
-	function createCross(dialog, callback){
-		dialog = resolveDialog(dialog);
-		
-		//Create the cross
-		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
-
-		//When the cross is clicked, execute the callback or just close
-		cross.click( function() {
-			if (callback){
-				callback();
-			}
-			else {
-				dialog.curtain.remove();
-			}
-		});
-
-		//Add the cross to header
-		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
-		header.append(cross);
-	}
-
-	/**Configures dialog with a header with a cross in the upper right corner and no footer
-	 * @param dialog	The name of the dialog to configure
-	 * @param title		The dialog title to display in the header
-	 * @param callback	A function to call when the cross is clicked, before the dialog closes*/
-	function crossOnly(dialog, title, callback) {
-
-		//Get dialog object
-		dialog = resolveDialog(dialog);
-
-		//Empty and hide footer
-		clearFooter(dialog);
-		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
-		footer.hide();
-
-		//Set dialog title
-		setDialogHeader(dialog, title);
-
-		//Create the cross
-		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
-
-		//When the cross is clicked, execute the callback and close
-		cross.click( function() {
-			if (callback){
-				callback();
-			}
-			dialog.curtain.remove();
-		});
-
-		//Add the cross to header
-		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
-		header.append(cross);
-
-	}
-
-	function crossOnlyWithOptions(dialog,title,options,callback) {
-		//Get dialog object
-		dialog = resolveDialog(dialog);
-
-		//Empty and hide footer
-		clearFooter(dialog);
-		var footer = dialog.dialog.find(".cloubi-modal-dialog-footer");
-		footer.hide();
-
-		//Set dialog title
-		setDialogHeader(dialog, title);
-
-		//Create the cross
-		var cross = jQuery('<div class="cloubi-modal-dialog-cross"><i class="fa fa-times"></i></div>');
-
-		if (options && options.crossText) {
-			var crossText = jQuery('<span class="cloubi-modal-dialog-cross-text"></span>');
-			crossText.text(options.crossText);
-		}
-
-		cross.prepend(crossText);
-
-		//When the cross is clicked, execute the callback and close
-		cross.click( function() {
-			if (callback){
-				callback();
-			}
-			dialog.curtain.remove();
-		});
-
-		//Add the cross to header
-		var header = dialog.dialog.find(".cloubi-modal-dialog-header");
-		header.append(cross);
-	}
-
-	function confirm(message, yesCallback, noCallback) {
-
-		var dialog = create(undefined, 'confirmDialog');
-
-		yesAndNo(dialog, function() {
-			closeDialog(dialog);
-			yesCallback();
-		}, Liferay.Language.get('cloubi-dialog-confirm-dialog-title'));
-
-		dialog.closeCallback = noCallback;
-
-		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
-
-		wrapper.text(message);
-
-		var content = dialog.dialog.find(".cloubi-modal-dialog-content");
-
-		content.append(wrapper);
-
-	}
-
-	function info(message, html, callback) {
-
-		var dialog = create(undefined, 'infoDialog');
-
-		closeOnly(dialog, Liferay.Language.get('cloubi-dialog-info-dialog-title'), callback);
-
-		var wrapper = jQuery('<div class="cloubi-modal-dialog-message"></div>');
-
-		if ( html ) {
-			wrapper.html(message);
-		} else {
-			wrapper.text(message);
-		}
-
-		var content = dialog.dialog.find(".cloubi-modal-dialog-content");
-
-		content.append(wrapper);
-
-	}
-
-	function resize() {
-
-		var height = jQuery(window).innerHeight() - 200;
-
-		jQuery(".cloubi-modal-dialog-content-wrapper").css("max-height", height + "px");
-
-	}
-
-	function initResize() {
-
-		if ( !resizeListenerCreated ) {
-
-			resizeListenerCreated = true;
-
-			jQuery(window).resize(resize);
-
-		}
-
-		resize();
-
-	}
-
-	function waiting(name) {
-
-		var curtain = jQuery('<div class="cloubi-modal-dialog-curtain cloubi-modal-dialog-old"></div>');
-		var dialog = jQuery('<div class="cloubi-modal-dialog"></div>');
-		var contentWrapper = jQuery('<div class="cloubi-modal-dialog-content-wrapper"></div>');
-		var content = jQuery('<div class="cloubi-modal-dialog-content"></div>');
-		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
-
-		curtain.append(dialog);
-
-		contentWrapper.append(content);
-
-		dialog.append(contentWrapper);
-
-		curtain.appendTo('body');
-
-		loadingAnimation.appendTo(content);
-
-		var dialogData = {
-			dialog: dialog,
-			curtain: curtain,
-			name: name
-		};
-
-		if ( name ) {
-			dialogMap[name] = dialogData;
-		}
-
-		initResize();
-
-		return dialogData;
-
-	}
-
-	/**Creates a new modal dialog
-	 * @param url		The url used to get the contents of the dialog
-	 * @param name		The name used to identify the dialog
-	 * @param optional	(optional)
-	 * @param parent	(optional) A jQuery element to which the dialog is appended.
-	 * 					If not specified, the dialog will be appended to body.*/
-	function create(url, name, optional, parent) {
-		//Create the HTML elements of the dialog
-		var curtain = jQuery('<div class="cloubi-modal-dialog-curtain cloubi-modal-dialog-old"></div>');
-		var dialog = jQuery('<div class="cloubi-modal-dialog"></div>');
-		var header = jQuery('<div class="cloubi-modal-dialog-header"></div>');
-		var contentWrapper = jQuery('<div class="cloubi-modal-dialog-content-wrapper"></div>');
-		var content = jQuery('<div class="cloubi-modal-dialog-content"></div>');
-		var footer = jQuery('<div class="cloubi-modal-dialog-footer"></div>');
-		var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
-
-		//Nest the created elements
-		curtain.append(dialog);
-
-		contentWrapper.append(content);
-
-		dialog.append(header).append(contentWrapper).append(footer);
-
-		//If a parent element was supplied, append the dialog to it, otherwise append the dialog to the document body
-		if (parent){
-			curtain.appendTo(parent);
-		}
-		else {
-			curtain.appendTo('body');
-		}
-
-		//Load the content HTML from the supplied url
-		if ( url ) {
-			loadingAnimation.appendTo(content);
-			//Do html POST request if the url parameter looks like an object
-			if ( url.post && url.url && url.data ) {
-				utils.post(url.url, url.data, function(html) {
-					content.html(html);
-				}, undefined, 'html');
-			} else {
-				content.load(url);
-			}
-		}
-
-		var dialogData = {
-			dialog: dialog,
-			curtain: curtain,
-			name: name,
-			url: url,
-			optional: optional
-		};
-
-		//Save the dialog object locally so that it can be referenced from inside the dialog
-		if ( name ) {
-			dialogMap[name] = dialogData;
-		}
-
-		initResize();
-
-		return dialogData;
-
-	}
-
-	function reloadDialog(dialog) {
-
-		dialog = resolveDialog(dialog);
-
-		if ( dialog.url ) {
-
-			clearFooter(dialog);
-
-			var loadingAnimation = jQuery('<div class="cloubi-modal-dialog-loading-animation"><i class="fa fa-circle-o-notch fa-spin"></i></div>');
-
-			var content = dialog.dialog.find(".cloubi-modal-dialog-content");
-
-			content.empty().append(loadingAnimation).load(dialog.url);
-
-		}
-
-	}
-
-
-	function forceSize(dialog, width, height) {
-
-		dialog = resolveDialog(dialog);
-
-		var container = dialog.dialog;
-		var wrapper = container.find(".cloubi-modal-dialog-content-wrapper");
-
-		wrapper.css("height", height + "px");
-		container.css("width", width + "%");
-
-	}
-
-	/**Maximizes the size of a dialog, making it take up as much size as it needs (up to window size -100 on both axes)
-	 * @param dialog	The name of the dialog*/
-	function maximize(dialog) {
-		dialog = resolveDialog(dialog);
-
-		var container = dialog.dialog;
-		var wrapper = container.find(".cloubi-modal-dialog-content-wrapper");
-
-		//calculate maximum size
-		var height = window.innerHeight - 200;
-		var width = window.innerWidth - 200;
-
-		//maximize the dialog
-		wrapper.css("max-height", height + "px");
-		container.css("max-width", width + "px");
-	}
-
-	function showErrorMessage(elem, text) {
-		var parent = elem.parent();
-		var wrapper = parent.find(".alert.alert-danger");
-
-		if (wrapper.length == 0) {
-			wrapper = jQuery("<div class='alert alert-danger'></div>");
-			parent.prepend(wrapper);
-		}
-
-		wrapper.text(text);
-	}
-
-	function removeErrorMessage(elem) {
-
-		if ( elem != undefined && elem != null ) {
-			elem.parent().find(".alert-danger").remove();
-		}
-
-	}
-
-	function addClass(dialog, className) {
-
-		dialog = resolveDialog(dialog);
-
-		dialog.dialog.addClass(className);
-
-	}
-
-	function addCurtainClass(dialog, className) {
-		
-		dialog = resolveDialog(dialog);
-		
-		dialog.curtain.addClass(className);
-		
-	}
-	
-	function getContentElem(dialog){
-		dialog = resolveDialog(dialog);
-		return dialog.curtain.find(".cloubi-modal-dialog-content");
-	}
-	
-	function showLargeStaticContent(contentType, content, title, desc) {
-
-		var popup = jQuery('<div class="cloubi-large-content-popup"></div>');
-		var close = jQuery('<div class="cloubi-large-content-popup-close">X</div>');
-		var contentElem = jQuery('<div class="cloubi-large-content-popup-content"></div>');
-		var wrapper = jQuery('<div class="cloubi-large-content-wrapper"></div>');
-
-		wrapper.append(close);
-
-		var closeCallback = function() { popup.remove(); jQuery(window).off('.largecontent'); };
-		var ignoreCallback = function(e) { e.stopPropagation(); };
-
-		if ( contentType == 'image' ) {
-
-			if ( title ) {
-				var titleElem = jQuery('<div class="cloubi-large-content-popup-content-title"></div>');
-				titleElem.text(title).appendTo(contentElem);
-				titleElem.click(ignoreCallback);
-			}
-
-			var image = jQuery('<img class="cloubi-large-content-image" />');
-			image.attr("src", content);
-			image.appendTo(wrapper);
-			image.click(ignoreCallback);
-
-			if ( desc ) {
-				var descElem = jQuery('<div class="cloubi-large-content-popup-content-desc"></div>');
-				descElem.text(desc).appendTo(contentElem);
-				descElem.click(ignoreCallback);
-			}
-
-			var adjustSize = function() {
-
-				var margin = 40;
-				if (window.innerWidth < 768) {
-					margin = 10;
-				}
-
-				image.css("max-height", popup.height() - margin);
-				image.css("max-width", popup.width() - margin);
-			}
-
-			setTimeout(adjustSize, 100);
-
-			jQuery(window).on('resize.largecontent', adjustSize);
-
-		} else if ( contentType == 'html' ) {
-
-			contentElem.html(content);
-
-		}
-
-		close.click(closeCallback);
-		popup.click(closeCallback);
-
-		contentElem.append(wrapper);
-		popup.append(contentElem).appendTo("body");
-
-	}
-
-	return {
-		create: create,
-		saveAndCancel: saveAndCancel,
-		saveOnly: saveOnly,
-		yesAndNo: yesAndNo,
-		closeOnly: closeOnly,
-		saveAndCross: saveAndCross,
-		crossOnly: crossOnly,
-		crossOnlyWithOptions: crossOnlyWithOptions,
-		loading: loading,
-		removeLoading: removeLoading,
-		getDialog: getDialog,
-		forceSize: forceSize,
-		maximize: maximize,
-		closeDialog: closeDialog,
-		waiting: waiting,
-		setSaveEnabled: setSaveEnabled,
-		showErrorMessage: showErrorMessage,
-		removeErrorMessage: removeErrorMessage,
-		loadingStatus: loadingStatus,
-		postActionAndPollUntilReady: postActionAndPollUntilReady,
-		confirm: confirm,
-		info: info,
-		reloadDialog: reloadDialog,
-		addClass: addClass,
-		addCurtainClass: addCurtainClass,
-		createButton: createButton,
-		createCross: createCross,
-		setDialogHeader: setDialogHeader,
-		showLargeStaticContent: showLargeStaticContent,
-		getContentElem: getContentElem
-	};
-
-});
-
-
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/translations', ['fi.cloubi.frontend.common.js/rest-client'], function (RestClient) {
-
-  var url = window.location.origin + "/o/rest/v1/";
-  var restClient = new RestClient(url);
-  var locale = null;
-  
-  function translateKeys() {
-    return translateAll(Array.prototype.slice.call(arguments));
-  }
-
-  function translateAll(keyArray) {
-    var data = {
-      locale: locale,
-      keys: Array.isArray(keyArray) ? keyArray : [keyArray]
-    };
-    
-    return restClient.POST("translations", data);
-  }
-
-  function setLocale(l) {
-    locale = l;
-  }
-  
-  function getLocale() {
-    return locale;
-  }
-
-  return {
-    translateKeys: translateKeys,
-    translateAll: translateAll,
-    setLocale: setLocale,
-    getLocale: getLocale
-  };
-
-});
-
-define('fi.cloubi.frontend.common.js@4.9.0.SNAPSHOT/utils', ['fi.cloubi.frontend.common.js/translations'], function(translationsJS) {
-
-	/** Offers utility functions for other JavaScript classes
-	 * @namespace utils
-	 */
-	var cssFileCache = null;
-	var extensions = {};
-
-	if (typeof String.prototype.endsWith !== 'function') {
-	    String.prototype.endsWith = function(suffix) {
-	        return this.indexOf(suffix, this.length - suffix.length) !== -1;
-	    };
-	}
-
-	
-
-	var Language = {};
-
-	if ( self.Liferay && self.Liferay.Language && self.Liferay.Language.cloubi ) {
-		
-		Language.get = Liferay.Language.get;
-		
-	} else {
-		
-		var AUI = YUI();
-		
-		Language.get = function(key) {
-			return key;
-		};
-
-		AUI.use(
-			'io-base',
-			function(AUI) {
-				Language.get = AUI.cached(
-					function(key, languageId, extraParams) {
-						var instance = this;
-
-						var url = Liferay.ThemeDisplay.getPathContext() + '/language/' + languageId + '/' + key + '/';
-
-						if (extraParams) {
-							if (typeof extraParams == 'string') {
-								url += extraParams;
-							}
-							else if (Array.isArray(extraParams)) {
-								url += extraParams.join('/');
-							}
-						}
-
-						var headers = {
-							'X-CSRF-Token': Liferay.authToken
-						};
-
-						var value = '';
-
-						AUI.io(
-							url,
-							{
-								headers: headers,
-								method: 'GET',
-								on: {
-									complete: function(i, o) {
-										value = o.responseText;
-									}
-								},
-								sync: true
-							}
-						);
-
-						return value;
-					}
-				);
-			}
-		);
-		
-	}
-	
-	var _draggingOn = false;
-
-	$("body").on("touchstart", function(){
-		_draggingOn = false;
-	});
-
-	$("body").on("touchmove", function(){
-		_draggingOn = true;
-	});
-
-	/**
-	 * Checks if dragging is enable
-	 * @memberof utils
-	 * @return {boolean} True if dragging is enabled
-	 *
-	 */
-	function isDraggingOn() {
-		return _draggingOn;
-	}
-
-	/**
-	 * Sends a get request to the given url
-	 * @memberof utils
-	 * @param url				URL where the request is sent
-	 * @param successCallback	A function that is invoked on request success
-	 * @param failureCallback	A function that is invoked on request failure
-	 */
-	function get(url, successCallback, failureCallback, allowCache) {
-
-		var settings = {
-			url: url,
-			dataType: 'json',
-			type: 'GET',
-			timeout: 5 * 60 * 1000,
-			success: function(responseJSON) {
-				if ( successCallback != null ) {
-					successCallback.call(this, responseJSON);
-				}
-			},
-			error: function() {
-				if ( failureCallback != null ) {
-					failureCallback.call(this);
-				}
-			}
-		}
-
-		if(!allowCache)
-			settings.cache = false;
-
-		jQuery.ajax(settings);
-
-	}
-
-	/**
-	 * Returns html content from given url
-	 * @memberof utils
-	 * @param url				URL where the request is sent
-	 * @param successCallback	A function that is invoked on request success
-	 * @param failureCallback	A function that is invoked on request failure
-	 */
-	function getHtml(url, successCallback, failureCallback, allowCache) {
-		var settings = {
-			url: url,
-			dataType: 'html',
-			type: 'GET',
-			timeout: 5 * 60 * 1000,
-			success: function(html) {
-				if ( successCallback != null ) {
-					successCallback.call(this, html);
-				}
-			},
-			error: function(xhr, error) {
-				if ( failureCallback != null ) {
-					failureCallback.call(this, error);
-				}
-			}
-		};
-
-		if(!allowCache)
-			settings.cache = false;
-
-		jQuery.ajax(settings);
-
-	}
-
-	/**
-	 * Sends a post request to the given url
-	 * @memberof utils
-	 * @param url				URL where the request is sent
-	 * @param data				The data that is sent in the request
-	 * @param successCallback	A function that is called on request success
-	 * @param failureCallback	A function that is called on request failure
-	 * @param responseDataType	Data type of the data that is sent
-	 */
-	function post(url, data, successCallback, failureCallback, responseDataType) {
-
-		if ( !responseDataType ) {
-			responseDataType = 'json';
-		}
-
-		jQuery.ajax({
-			url: url,
-			dataType: responseDataType,
-			contentType: 'application/json; charset=UTF-8',
-			type: 'POST',
-			timeout: 5 * 60 * 1000,
-			data: JSON.stringify(data),
-			headers: {
-				'X-CSRF-Token': Liferay.authToken
-			},
-			success: function(responseData) {
-				if ( successCallback != null ) {
-					successCallback.call(this, responseData);
-				}
-			},
-			error: function(xhr, status) {
-				if ( failureCallback != null ) {
-					failureCallback.call(this, status);
-				}
-			},
-			skipReconnectCheck: failureCallback != null
-		});
-
-	}
-
-	// This version of post also returns request data for cases where the request info is required in resolution
-	function postWithRequestData(url, data, successCallback, failureCallback, responseDataType) {
-
-		if ( !responseDataType ) {
-			responseDataType = 'json';
-		}
-
-		return jQuery.ajax({
-			url: url,
-			dataType: responseDataType,
-			contentType: 'application/json; charset=UTF-8',
-			type: 'POST',
-			timeout: 5 * 60 * 1000,
-			data: JSON.stringify(data),
-			headers: {
-				'X-CSRF-Token': Liferay.authToken
-			},
-			success: function(responseData) {
-				if ( successCallback != null ) {
-					successCallback.call(this, data, responseData);
-				}
-			},
-			error: function(xhr, status) {
-				if ( failureCallback != null ) {
-					failureCallback.call(this, status);
-				}
-			},
-			skipReconnectCheck: failureCallback != null
-		});
-
-	}
-
-	var failingRequests = [];
-	var beforeUnload = function(event) {
-        event.preventDefault();
-        return '';
-    };
-    var spinnerTimeout = null;
-	var loadingSpinner = null;
-	var pendingRequests = 0;
-
-	var translatedLoadingText = Language.get('cloubi-dialog-job-is-running', translationsJS.getLocale());
-	var loadingSpinnerTemplate = '<div id="cloubi-utils-unsaved-data-flash-message"><span class="saving-in-progress"><i class="cloubi-utils-unsaved-data-flash-message-spinner fa-spin"></i><span id="cloubi-utils-unsaved-data-flash-message-text">' + translatedLoadingText + '</span></span></div>';
-
-	function postUntilSuccessful(url, data, successCallback, failureCallback, responseDataType) {
-
-        //Make request object so we can store the parameters and redo the request later
-        var request = {
-            url: url,
-            data: data,
-            successCallback: successCallback,
-            failureCallback: failureCallback,
-            responseDataType: responseDataType
-        }
-        pendingRequests++;
-        if (pendingRequests == 1) {
-            //If this is the first request, setup safety features
-
-            //Show spinner on timeout
-            spinnerTimeout = setTimeout(function() {
-                if (!loadingSpinner) {
-                    loadingSpinner = $(loadingSpinnerTemplate);
-                    $(document.body).append(loadingSpinner);
-                }
-            }, 2000);
-
-            //Register before unload handler
-            $(window).on('beforeunload', beforeUnload);
-        }
-
-        // Success handler
-        var finishRequest = function(originalRequest, responseData) {
-            //Finish the original request
-            originalRequest.successCallback(responseData);
-            pendingRequests--;
-
-            //If there are no more requests, clear safety features
-            if (pendingRequests == 0) {
-                //Clear spinner timeout
-                clearTimeout(spinnerTimeout);
-                //Remove loading spinner if it was already shown
-                if (loadingSpinner) {
-                    loadingSpinner.remove();
-                    loadingSpinner = null;
-                }
-                //Clear before unload function
-                $(window).off('beforeunload', beforeUnload);
-            }
-
-        }
-
-        // Failure handler: retries the request until it completes
-        var retryPost = function(failingRequest, delay) {
-            // Post the request, retry if it fails
-            post(failingRequest.url, failingRequest.data,
-            function(response) {
-                finishRequest(failingRequest, response)
-
-                //If there are more failing requests, play back the next one on the list
-                if (failingRequests.length > 0) {
-                    var next = failingRequests.shift();
-                    retryPost(next, 1);
-                }
-            },
-            function() {
-                // On failure, increase delay and retry after timeout
-                if (delay < 15) {
-                    delay++;
-                }
-                console.log("Post failed, retrying in " + delay + " seconds")
-                setTimeout(function() {retryPost(failingRequest, delay)}, delay * 1000);
-            }, failingRequest.responseDataType)
-        }
-
-        // If no requests have failed, run the request as normal
-	    if (failingRequests.length == 0) {
-	        post(url, data,
-	        function(response) {
-	            finishRequest(request, response)
-	        },
-	        function() {
-	            //If the request fails, push it to the failed request list
-	            failingRequests.push(request)
-
-	            if (failingRequests.length == 1) {
-                    //If this was the first failed request, start the retry loop
-                    retryPost(request, 1);
-	            }
-	        }, responseDataType)
-	    }
-	    else {
-	        //If there are already failing requests, add this to the list so it will be processed when previous ones are done
-	        failingRequests.push(request)
-	    }
-	}
-	
-	/**
-	 * Uploads a file to the given url
-	 * @memberof utils
-	 * @param url				URL where the request is sent
-	 * @param params			The data that is sent in the request
-	 * @param file				The file that is uploaded with the request
-	 * @param successCallback	A function that is called on request success
-	 * @param failureCallback	A function that is called on request failure
-	 * @param filename			The part name of the file (default 'file')
-	 * @param responseDataType	Data type of the data that is sent
-	 */
-	function upload(url, params, file, successCallback, failureCallback, filename, responseDataType) {
-		responseDataType = responseDataType || 'json';
-		filename = filename || "file";
-		
-		var data = new FormData();
-		data.append(filename, file);
-		$.each(params, function(name, value){
-			data.append(name, value);
-		});
-
-		jQuery.ajax({
-			url: url,
-			dataType: responseDataType,
-			contentType: false,
-			enctype: 'multipart/form-data',
-			async: true,
-			type: 'POST',
-			timeout: 5 * 60 * 1000,
-			data: data,
-			processData: false,
-			headers: {
-				'X-CSRF-Token': Liferay.authToken
-			},
-			success: function(responseData) {
-				if ( successCallback != null ) {
-					successCallback.call(this, responseData);
-				}
-			},
-			error: function(xhr, status) {
-				if ( failureCallback != null ) {
-					failureCallback.call(this, status);
-				}
-			},
-			skipReconnectCheck: failureCallback != null
-		});
-	}
-
-	/**
-	 * Reloads the current page
-	 * @memberof utils
-	 */
-	function reload() {
-
-		self.location.reload();
-
-	}
-
-	/**
-	 * Polls URL until it is ready to complete the given callback function
-	 * @memberof utils
-	 * @param url		The URL that is being polled
-	 * @param callback	The callback function that is called when the URL is ready
-	 * @param tick
-	 */
-	function pollUntilReady(url, callback, tick) {
-
-		jQuery.ajax({
-			url: url,
-			dataType: 'json',
-			contentType: 'application/json; charset=UTF-8',
-			type: 'GET',
-			timeout: 5 * 60 * 1000,
-			data: '',
-			success: function(data) {
-				if ( data.hasJob ) {
-					if ( tick ) {
-						tick(data);
-					}
-					setTimeout( function() {
-						pollUntilReady(url, callback, tick);
-					}, 1000 );
-				} else {
-					callback();
-				}
-			},
-			error: function() {
-				callback();
-			},
-			cache: false
-		});
-
-	}
-
-	/** Returns a list of parameters in a function invocation
-	 * @memberof utils
-	 * @param invocation	The invocation
-	 * @return				A list of parameters in the invocation
-	 */
-	function parseFunctionInvocation(invocation) {
-
-		var start = invocation.indexOf("(");
-		var end = invocation.indexOf(")");
-
-		if ( start == -1 ) {
-			return {
-				name: invocation,
-				params: []
-			};
-		} else {
-			var name = invocation.substring(0, start);
-			var paramsStr = null;
-			if ( end == -1 ) {
-				paramsStr = invocation.substring(start+1);
-			} else {
-				paramsStr = invocation.substring(start+1, end);
-			}
-			var params = paramsStr.split(",");
-			return {
-				name: name,
-				params: params
-			};
-		}
-
-	}
-
-	/** This function seeks the specified DOM element and all it's child elements to see if they have a data-on-click attribute.
-	 * @memberof utils
-	 * @param container	The DOM element.
-	 * @param functions Object of functions that will listen events defined in trigger() -method or data-on-click attributes.
-	 * @param name		The name of the events that are listened to
-	 */
-	function attachListeners(container, functions, name) {
-
-		var attrName = "data-on-" + name;
-		var namespaced = name + ".from-data-attr";
-
-		container.find("[" + attrName + "]").each( function() {
-			var element = jQuery(this);
-			var invocation = parseFunctionInvocation(element.attr(attrName));
-			var func = functions[invocation.name];
-			if ( func ) {
-				element.on(namespaced, function(event) {
-					var params = invocation.params.slice(0);
-					params.push(event);
-					func.apply(this, params);
-				});
-			}
-		} );
-
-	}
-
-	/** Specifies listeners for events defined in trigger() method or directly in DOM using a special data-attributes.
-	 * @memberof utils
-	 * @param containerId	The id of the DOM element.
-	 * @param functions		Object of functions that will listen events defined in trigger() -method or data-on-click attributes.
-	 * @param onReady		Function that is executed when DOM is ready
-	 */
-	function listeners(containerId, functions, onReady) {
-
-		var container = jQuery("#" + containerId);
-
-		attachListeners(container, functions, "click");
-		attachListeners(container, functions, "dblclick");
-		attachListeners(container, functions, "change");
-		attachListeners(container, functions, "keyup");
-		attachListeners(container, functions, "touchend");
-
-		container.on("cloubi:custom-event.from-data-attr", function(event, name, data) {
-			var func = functions[name];
-			if ( func ) {
-				func(data);
-			}
-		});
-
-		if ( onReady ) {
-			jQuery(document).ready(onReady);
-		}
-
-	}
-
-	/**
-	 * Clears event listeners from the DOM element defined in listeners() -method.
-	 * @memberof utils
-	 * @param container	The container from which listeners are cleared from
-	 * @param name		The type of listeners that are being removed
-	 */
-	function clearListenersOfType(container, name) {
-
-		var attrName = "data-on-" + name;
-		var namespaced = name + ".from-data-attr";
-
-		container.find("[" + attrName + "]").off(namespaced);
-
-	}
-
-	/**
-	 * Clears listeners from container
-	 * @memberof utils
-	 * @param containerId	The id of the container for which listeners are cleared for
-	 */
-	function clearListeners(containerId) {
-
-		var container = jQuery("#" + containerId);
-
-		clearListenersOfType(container, "click");
-		clearListenersOfType(container, "change");
-		clearListenersOfType(container, "keyup");
-		clearListenersOfType(container, "touchend");
-
-		container.off("cloubi:custom-event.from-data-attr");
-
-	}
-
-	/**
-	 * Triggers Cloubi custom event for given DOM element.
-	 * @memberof utils
-	 * @param containerId	The id of the DOM element.
-	 * @param name			The name of the event
-	 * @param data			The event data.
-	 */
-	function trigger(containerId, name, data) {
-
-		var container = jQuery("#" + containerId);
-
-		container.trigger("cloubi:custom-event", [name, data]);
-
-	}
-
-	/**	Sets the given element as editable
-	 * @memberof utils
-	 * @param element	The element that is going to be edited
-	 * @param callback	Callback function that is called once the element has been edited
-	 */
-	function editable(element, callback) {
-
-		var text = element.text();
-
-		var editor = jQuery('<div class="cloubi-text-editable"></div>');
-		var field = jQuery('<input type="text" />');
-		var saveButton = jQuery('<button class="btn"><span class="fa fa-check"></span></button>');
-		var cancelButton = jQuery('<button class="btn"><span class="fa fa-times"></span></button>');
-
-		field.val(text);
-		editor.append(field, saveButton, cancelButton);
-
-		function doSave() {
-			callback(field.val(), element);
-			element.show();
-			editor.remove();
-		}
-
-		field.keyup( function(e) {
-			if ( e.keyCode == 13 ) {
-				doSave();
-			}
-		});
-
-		cancelButton.click(function() {
-			element.show();
-			editor.remove();
-		});
-
-		saveButton.click(doSave);
-
-		element.hide();
-
-		element.parent().append(editor);
-
-	}
-
-	/**
-	 * Returns session storage for the current page
-	 * @memberof utils
-	 * @return {Object} Session storage, if available
-	 */
-	function getStorage() {
-
-		try {
-
-			if ( window.sessionStorage ) {
-				var json = window.sessionStorage.getItem("Cloubi");
-				if ( json != null ) {
-					return JSON.parse(json);
-				}
-			}
-
-		} catch ( error ) {}
-
-		return {};
-
-	}
-
-	/**
-	 * Sets the session storage for the current page
-	 * @memberof utils
-	 * @param data	Session storage data
-	 */
-	function setStorage(data) {
-
-		try {
-
-			if ( window.sessionStorage ) {
-				window.sessionStorage.setItem("Cloubi", JSON.stringify(data));
-			}
-
-		} catch ( error ) {}
-
-	}
-
-	/**
-	 * This is a helper method to handle window.sessionStorage.
-	 *	If one wants to use the session storage, this method has to be used so that the session storage works perfectly in Cloubi 2.0.
-	 *	The namespace ensures that there can be multiple separate stores within the session storage.
-	 *	Puts value to session store.
-	 * @memberof utils
-	 * @param namespace		The name of the store.
-	 * @param key			The name for the value in the store.
-	 * @param value			The value put into the store.
-	 */
-	function putToSessionStore( namespace, key, value ) {
-		var data = getStorage();
-		data[namespace] = data[namespace] || {};
-		data[namespace][key] = value;
-		setStorage(data);
-	}
-
-	/**
-	 * Gets value from session store.
-	 * @memberof utils
-	 * @param namespace	The name of the store
-	 * @param key		The name for the value in the store.
-	 * @return {object}	The value put in the store. If the store has no value for the specified namespace and the key then null is returned.
-	 *
-	 */
-	function getFromSessionStore( namespace, key ) {
-		var data = getStorage();
-		if ( data[namespace] ) {
-			return data[namespace][key];
-		}
-		return null;
-	}
-
-	/**
-	 * Clears the store for the specified namespace from the session storage.
-	 * @memberof utils
-	 * @param namespace	The name of the store to clear
-	 */
-	function clearSessionStore( namespace ) {
-		var data = getStorage();
-		data[namespace] = {};
-		setStorage(data);
-	}
-
-	/**
-	 * Adds query parameter to url.
-	 * @memberof utils
-	 * @param url		Url where the query parameter is added
-	 * @param name		This will be set as query parameter name. Assumes that name complies with the query parameter name syntax rules
-	 * @param value		This will be set as query parameter value. Value is uri encoded so it can contain URI reserved characters
-	 * @return {string}	Url with the new query parameter added on it.
-	 */
-	function addUrlParameter(url, name, value) {
-	    if (url.indexOf('?') == -1) {
-	    	url = url + '?';
-	    }
-
-	    if (url.indexOf('=') >= 0) {
-	    	url = url + '&';
-	    }
-
-	    url = url + name + '=' + encodeURIComponent(value);
-	    return url;
-	}
-
-	/**
-	 * This method fetches GET parameter values.
-	 * @memberof utils
-	 * @param name		The name of the parameter that is returned
-	 * @return {string}	Parameter value
-	 */
-	function getUrlParameter(name) {
-	    var match = RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
-	    return match && decodeURIComponent(match[1].replace(/\+/g, ' '));
-	}
-
-	/**
-	 * Checks if the url has pathPart in its path. Here pathPart means the string between slashes in the path.
-	 * @memberof utils
-	 * @param name			Specifies the part of the path to find from the url path.
-	 * @return {boolean}	true, if the path part was found, otherwise false
-	 */
-	function hasUrlPathPart(name) {
-	    var pathParts = window.location.pathname.split('/');
-	    if (pathParts.length == 0)return false;
-
-	    return pathParts.indexOf(name) >= 0;
-
-	}
-
-	/**
-	 * Removes all css classes from element that starts with wildcard -parameter
-	 * @memberof utils
-	 * @param wildcard		Key used in removal operation of the element css classes
-	 * @param obj			The object from which classes are removed from
-	 * @return {function}
-	 */
-	function removeClassesWithWildcard(wildcard, obj) {
-
-		var patt = new RegExp('\\b' + wildcard + '\\S+',"g");
-
-		obj.removeClass(function (index, className) {
-			return (className.match(patt) || []).join(' ');
-		});
-
-	}
-
-	/**
-	 * Checks if a string starts with a certain prefix
-	 * @memberof utils
-	 * @param str			The string that is being checked for the prefix
-	 * @param prefix		The prefix for which the string is being checked for
-	 * @return {boolean}	True if string starts with the given prefix
-	 */
-	function stringStartsWith( str, prefix ) {
-
-		return str.indexOf(prefix) === 0;
-
-	}
-
-
-	function initCssFileCache() {
-		if ( cssFileCache == null ) {
-			cssFileCache = {};
-			jQuery("head link").each(function() {
-				var href = jQuery(this).attr("href");
-				cssFileCache[href] = true;
-			});
-		}
-	}
-
-	/**
-	 * Links given css file to the document
-	 * @memberof utils
-	 * @param cssFile	The css file that is being linked to the document
-	 */
-	function loadCSS(cssFile) {
-
-		initCssFileCache();
-
-		if ( cssFileCache[cssFile] ) {
-			return;
-		}
-
-		cssFileCache[cssFile] = true;
-
-		jQuery("<link>").appendTo("head").attr({type: "text/css", rel: "stylesheet"}).attr("href", cssFile);
-
-	}
-	
-	/**
-	 * Makes the loadCSS function ignore given css file. Use this if the css declarations are already loaded some other way.
-	 * @memberof utils
-	 * @param cssFile	The css file to be ignored.
-	 */
-	function markCSSLoaded(cssFile) {
-		initCssFileCache();
-		cssFileCache[cssFile] = true;
-	}
-
-	/** Registers an extension
-	 * @memberof utils
-	 * @param name		Name of the extension being registered
-	 * @param callback
-	 */
-	function registerExtension(name, callback) {
-
-		if ( extensions[name] ) {
-
-			extensions[name].callbacks.push(callback);
-
-			if ( extensions[name].data ) {
-				callback(extensions[name].data);
-			}
-
-		} else {
-
-			extensions[name] = {
-				callbacks: [callback]
-			};
-
-		}
-
-	}
-
-	/**
-	 * @memberof utils
-	 * @param name
-	 * @param data
-	 */
-	function extensionReady(name, data) {
-
-		if ( extensions[name] ) {
-
-			extensions[name].data = data;
-
-			jQuery.each(extensions[name].callbacks, function(index, func) {
-				func(data);
-			});
-
-		} else {
-
-			extensions[name] = {
-				callbacks: [],
-				data: data
-			};
-
-		}
-
-	}
-
-	/**
-	 * Returns a function, that, as long as it continues to be invoked, will not be triggered.
-	 * The function will be called after it stops being invoked for N milliseconds.
-	 * If 'immediate' is passed, trigger the function on the leading edge, instead of trailing.
-	 * @memberof utils
-	 * @param func			The function that is returned
-	 * @param wait
-	 * @param immediate		Is function triggered on the leading edge
-	 * @return {function}	The function that is called after it stops being invoked
-	 */
-	function debounce(func, wait, immediate) {
-		var timeout;
-		return function() {
-			var context = this, args = arguments;
-			var later = function() {
-				timeout = null;
-				if (!immediate) func.apply(context, args);
-			};
-			var callNow = immediate && !timeout;
-			clearTimeout(timeout);
-			timeout = setTimeout(later, wait);
-			if (callNow) func.apply(context, args);
-		};
-	}
-
-	/**
-	 * Loops all properties of JS -object. Property handler is called for each looped property.
-	 * @memberof utils
-	 * @param obj	JavaScript object whose properties are looped.
-	 * @param func	TThis handler is called for each property.
-	 */
-	function loopProperties(obj, func) {
-
-
-	    for (var prop in obj) {
-
-	    	// skip loop if the property is from prototype
-	        if(!obj.hasOwnProperty(prop)) continue;
-
-	        func(obj, prop);
-		}
-	}
-
-	/**
-	 * Returns an array of visible pages that are set as checked in the given table
-	 * @memberof utils
-	 * @param table
-	 */
-	function getVisibleSelectedPages(table) {
-
-		var pageIds = [];
-
-		var inputs = jQuery(table).find(".page-selected:checked");
-
-		jQuery.each(inputs, function() {
-
-			if ( jQuery(this).closest("tr").is(":visible") ) {
-				pageIds.push(jQuery(this).attr("data-tt-id"));
-			}
-
-
-		});
-
-		return pageIds;
-
-	}
-
-
-	/**
-	 * Returns translation for the wanted language based on key and languageId
-	 * @memberof utils
-	 * @param key			Key of the sentence/word that is being returned
-	 * @param languageId	Language Id
-	 * @param extraParams	Extra parameters
-	 * @return {string} 	The translated sentence/word for the wanted language based on given language Id
-	 *
-	 */
-	function getLanguageValue(key, languageId, extraParams) {
-		return Language.get(key, languageId, extraParams);
-	}
-
-	/**Generates a render url
-	 * @memberof utils
-	 * @param namespace	A portlet namespace as generated by the portlet:namespace tag
-	 * @param view		The name of the view to load
-	 * @return	A url that can be used to load the specified view*/
-	function getRenderUrl(namespace, view){
-		//Strip leading and trailing underscores
-		if (namespace.startsWith("_")){
-			namespace = namespace.substr(1);
-		}
-		if (namespace.endsWith("_")){
-			namespace = namespace.slice(0, -1);
-		}
-		//Use current location as a base
-		var url = location.href;
-		//Add portlet ID
-		url = addUrlParameter(url, "p_p_id", namespace);
-		//Lifecycle 0 == view
-		url = addUrlParameter(url, "p_p_lifecycle", 0);
-		url = addUrlParameter(url, "p_p_state", "exclusive");
-		url = addUrlParameter(url, "p_p_mode", "view");
-		//Add view identifier
-		url = addUrlParameter(url, "_" + namespace + "_view", view);
-		return url;
-	}
-
-	/**Generates an action url
-	 * @memberof utils
-	 * @param namespace	A portlet namespace as generated by the portlet:namespace tag
-	 * @param action	The name of the action
-	 * @return	A url that can be used to execute the action*/
-	function getActionUrl(namespace, action){
-		//Strip leading and trailing underscores
-		if (namespace.startsWith("_")){
-			namespace = namespace.substr(1);
-		}
-		if (namespace.endsWith("_")){
-			namespace = namespace.slice(0, -1);
-		}
-		//Use current location as a base
-		var url = location.href;
-		//Add portlet ID
-		url = addUrlParameter(url, "p_p_id", namespace);
-		//Lifecycle 1 == action
-		url = addUrlParameter(url, "p_p_lifecycle", 1);
-		url = addUrlParameter(url, "p_p_state", "exclusive");
-		url = addUrlParameter(url, "p_p_mode", "view");
-		//Add action identifier
-		url = addUrlParameter(url, "_" + namespace + "_javax.portlet.action", action);
-		//Add auth token
-		url = addUrlParameter(url, "p_auth", Liferay.authToken);
-		return url;
-	}
-
-	/**Transplants query parameters from an URL to the current URL
-	 * @memberof utils
-	 * @param url	A URL that has query parameters
-	 * @return	The current base URL with the query parameters of the specified URL*/
-	function moveParamsToCurrentUrl(url){
-		var params = url.split("?")[1];
-		return location.href.split("?")[0] + "?" + params;
-	}
-
-	/**Scrolls the page until the specified element is visible. If the element is larger than screen height, the screen will be scrolled to show the
-	 * top of the element and as much of its body as possible
-	 * @memberof utils
-	 * @param $elem	A jQuery object specifying the element to show
-	 * @param topOffset	The number of pixels to leave at the top for header bars etc. (default: 110)*/
-	function scrollElementIntoView($elem, topOffset){
-		topOffset = topOffset || 110;
-
-		//Get the top edge of the element
-		var elemTop = $elem.offset().top;
-		//Calculate position of the element's bottom edge
-    	var elemBottom = elemTop + $elem.height();
-    	//Get the top edge of the screen
-    	var screenTop = window.scrollY;
-    	//Calculate the current position of the screen's bottom edge
-    	var screenBottom = screenTop + window.innerHeight;
-
-    	//Check if the top of the screen is visible
-    	if (elemTop < screenTop + topOffset){
-    		//If not, scroll up until the element is in view
-    		$("html, body").animate({ scrollTop: elemTop - 10 - topOffset }, 250);
-    	}
-    	//Check if the bottom of the element is visible
-    	else if (elemBottom > screenBottom){
-    		var target;
-    		//If the element doesn't fit on the screen, show as much as possible
-    		if ($elem.height() > window.innerHeight){
-    			target = elemTop - 10 - topOffset;
-    		}
-    		else {
-    			//Otherwise scroll down to show the entire element
-    			target = elemBottom - window.innerHeight + 10;
-    		}
-    		//scroll the element into view
-    		$("html, body").animate({ scrollTop: target }, 250);
-    	}
-    }
-
-    /**
-     * Generates a random UUID.
-     * @memberOf utils
-     * @return {string} The generated UUID.
-     */
-	function randomUUID() {
-		return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, function(c) {
-			return (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16);
-		});
-	}
-	
-	function deepEqual(a, b){
-		if (a === b) return true;
-		if (typeof a !== typeof b) return false;
-		if (typeof a === 'object' || typeof a === 'array') {
-			var equal = true;
-			$.each(a, function(key){
-				if (!deepEqual(a[key], b[key])){
-					equal = false;
-					return false; //break
-				}
-			});
-			return equal;
-		}
-		return false;
-	}
-	
-	function deepExtend(target, source) {
-		for (var property in source) {
-			if (property in target && typeof target[property] === 'object') {
-				deepExtend(target[property], source[property]);
-			} else {
-				target[property] = source[property];
-			}
-		}
-		return target;
-	}
-
-	return {
-		get: get,
-		getHtml: getHtml,
-		post: post,
-		postWithRequestData: postWithRequestData,
-		postUntilSuccessful: postUntilSuccessful,
-		upload: upload,
-		reload: reload,
-		listeners: listeners,
-		clearListeners: clearListeners,
-		pollUntilReady: pollUntilReady,
-		editable: editable,
-		trigger: trigger,
-		putToSessionStore: putToSessionStore,
-		getFromSessionStore: getFromSessionStore,
-		clearSessionStore: clearSessionStore,
-		addUrlParameter: addUrlParameter,
-		getUrlParameter: getUrlParameter,
-		hasUrlPathPart: hasUrlPathPart,
-		removeClassesWithWildcard: removeClassesWithWildcard,
-		stringStartsWith: stringStartsWith,
-		loadCSS: loadCSS,
-		markCSSLoaded: markCSSLoaded,
-		debounce: debounce,
-		loopProperties: loopProperties,
-		getVisibleSelectedPages: getVisibleSelectedPages,
-		registerExtension: registerExtension,
-		extensionReady: extensionReady,
-		getLanguageValue: getLanguageValue,
-		isDraggingOn: isDraggingOn,
-		attachListeners: attachListeners,
-		getRenderUrl: getRenderUrl,
-		getActionUrl: getActionUrl,
-		moveParamsToCurrentUrl: moveParamsToCurrentUrl,
-		scrollElementIntoView: scrollElementIntoView,
-		randomUUID: randomUUID,
-		deepEqual: deepEqual,
-		deepExtend: deepExtend
-	};
-
-});
-
-jQuery(document).ready(function() {
-	
-	function initSession() {
-		
-		//Delay init until the session is available
-		if ( Liferay.Session ) {
-			//The Liferay session object is buggy, so we turn its timer off and extend the session ourselves
-			Liferay.Session.resetInterval = function(){};
-			Liferay.Session._stopTimer();
-			//Extend session every 4 minutes (since Cloubi is configured to expire it after 5 minutes by default)
-			setInterval(function(){
-				//Use the session's own extension call to make sure it works correctly
-				Liferay.Session._getExtendIO().start();
-			}, 4 * 60 * 1000);
-			//Old deprecated code
-			//Liferay.Session.set('autoExtend', true);
-			//Liferay.Session.set('sessionLength', 15);
-			//Liferay.Session.set('warningLength', 0);
-			
-			//Liferay.Session.resetInterval();
-		} else {
-			
-			setTimeout( initSession, 100 );
-			
-		}
-		
-	}
-	
-	initSession();
-	
-});
 jQuery(document).ready(function() {
 
 	var localSessionValues = {};
@@ -10080,17 +10049,6 @@ jQuery(document).ready(function() {
 	}
 
 });
-if ( self.__CONFIG__ ) {
-	
-	__CONFIG__.waitTimeout = 0;
-	
-}
-
-if ( self.Loader && self.Loader._configParser && Loader._configParser._config ) {
-	
-	Loader._configParser._config.waitTimeout = 0;
-	
-}
 jQuery(document).ready(function() {
     var sessionKey= 'lastactive';
     var sessionInactiveTTL = 70 * 1000;
@@ -10169,6 +10127,56 @@ jQuery(document).ready(function() {
         });
     }
 });
+jQuery(document).ready(function() {
+	
+	function initSession() {
+		
+		//Delay init until the session is available
+		if ( Liferay.Session ) {
+			//The Liferay session object is buggy, so we turn its timer off and extend the session ourselves
+			Liferay.Session.resetInterval = function(){};
+			Liferay.Session._stopTimer();
+			//Extend session every 4 minutes (since Cloubi is configured to expire it after 5 minutes by default)
+			setInterval(function(){
+				//Use the session's own extension call to make sure it works correctly
+				Liferay.Session._getExtendIO().start();
+			}, 4 * 60 * 1000);
+			//Old deprecated code
+			//Liferay.Session.set('autoExtend', true);
+			//Liferay.Session.set('sessionLength', 15);
+			//Liferay.Session.set('warningLength', 0);
+			
+			//Liferay.Session.resetInterval();
+		} else {
+			
+			setTimeout( initSession, 100 );
+			
+		}
+		
+	}
+	
+	initSession();
+	
+});
+if ( self.__CONFIG__ ) {
+	
+	__CONFIG__.waitTimeout = 0;
+	
+}
+
+if ( self.Loader && self.Loader._configParser && Loader._configParser._config ) {
+	
+	Loader._configParser._config.waitTimeout = 0;
+	
+}
+define('fi.cloubi.lib.js@4.9.0.SNAPSHOT/modernizr-custom', [], function(){
+
+/*! modernizr 3.3.1 (Custom Build) | MIT *
+ * https://modernizr.com/download/?-csscalc-cssremunit-setclasses !*/
+!function(e,n,s){function t(e,n){return typeof e===n}function a(){var e,n,s,a,o,i,c;for(var f in l)if(l.hasOwnProperty(f)){if(e=[],n=l[f],n.name&&(e.push(n.name.toLowerCase()),n.options&&n.options.aliases&&n.options.aliases.length))for(s=0;s<n.options.aliases.length;s++)e.push(n.options.aliases[s].toLowerCase());for(a=t(n.fn,"function")?n.fn():n.fn,o=0;o<e.length;o++)i=e[o],c=i.split("."),1===c.length?Modernizr[c[0]]=a:(!Modernizr[c[0]]||Modernizr[c[0]]instanceof Boolean||(Modernizr[c[0]]=new Boolean(Modernizr[c[0]])),Modernizr[c[0]][c[1]]=a),r.push((a?"":"no-")+c.join("-"))}}function o(e){var n=f.className,s=Modernizr._config.classPrefix||"";if(u&&(n=n.baseVal),Modernizr._config.enableJSClass){var t=new RegExp("(^|\\s)"+s+"no-js(\\s|$)");n=n.replace(t,"$1"+s+"js$2")}Modernizr._config.enableClasses&&(n+=" "+s+e.join(" "+s),u?f.className.baseVal=n:f.className=n)}function i(){return"function"!=typeof n.createElement?n.createElement(arguments[0]):u?n.createElementNS.call(n,"http://www.w3.org/2000/svg",arguments[0]):n.createElement.apply(n,arguments)}var r=[],l=[],c={_version:"3.3.1",_config:{classPrefix:"",enableClasses:!0,enableJSClass:!0,usePrefixes:!0},_q:[],on:function(e,n){var s=this;setTimeout(function(){n(s[e])},0)},addTest:function(e,n,s){l.push({name:e,fn:n,options:s})},addAsyncTest:function(e){l.push({name:null,fn:e})}},Modernizr=function(){};Modernizr.prototype=c,Modernizr=new Modernizr;var f=n.documentElement,u="svg"===f.nodeName.toLowerCase();Modernizr.addTest("cssremunit",function(){var e=i("a").style;try{e.fontSize="3rem"}catch(n){}return/rem/.test(e.fontSize)});var m=c._config.usePrefixes?" -webkit- -moz- -o- -ms- ".split(" "):["",""];c._prefixes=m,Modernizr.addTest("csscalc",function(){var e="width:",n="calc(10px);",s=i("a");return s.style.cssText=e+m.join(n+e),!!s.style.length}),a(),o(r),delete c.addTest,delete c.addAsyncTest;for(var p=0;p<Modernizr._q.length;p++)Modernizr._q[p]();e.Modernizr=Modernizr}(window,document);
+
+});
+
 define('fi.cloubi.lib.js@4.9.0.SNAPSHOT/offline', [], function(){
 
 /*! offline-js 0.7.17 */
@@ -27098,12 +27106,4 @@ define('fi.cloubi.lib.js@4.9.0.SNAPSHOT/jquery', [], function() {
 });
 
 
-
-define('fi.cloubi.lib.js@4.9.0.SNAPSHOT/modernizr-custom', [], function(){
-
-/*! modernizr 3.3.1 (Custom Build) | MIT *
- * https://modernizr.com/download/?-csscalc-cssremunit-setclasses !*/
-!function(e,n,s){function t(e,n){return typeof e===n}function a(){var e,n,s,a,o,i,c;for(var f in l)if(l.hasOwnProperty(f)){if(e=[],n=l[f],n.name&&(e.push(n.name.toLowerCase()),n.options&&n.options.aliases&&n.options.aliases.length))for(s=0;s<n.options.aliases.length;s++)e.push(n.options.aliases[s].toLowerCase());for(a=t(n.fn,"function")?n.fn():n.fn,o=0;o<e.length;o++)i=e[o],c=i.split("."),1===c.length?Modernizr[c[0]]=a:(!Modernizr[c[0]]||Modernizr[c[0]]instanceof Boolean||(Modernizr[c[0]]=new Boolean(Modernizr[c[0]])),Modernizr[c[0]][c[1]]=a),r.push((a?"":"no-")+c.join("-"))}}function o(e){var n=f.className,s=Modernizr._config.classPrefix||"";if(u&&(n=n.baseVal),Modernizr._config.enableJSClass){var t=new RegExp("(^|\\s)"+s+"no-js(\\s|$)");n=n.replace(t,"$1"+s+"js$2")}Modernizr._config.enableClasses&&(n+=" "+s+e.join(" "+s),u?f.className.baseVal=n:f.className=n)}function i(){return"function"!=typeof n.createElement?n.createElement(arguments[0]):u?n.createElementNS.call(n,"http://www.w3.org/2000/svg",arguments[0]):n.createElement.apply(n,arguments)}var r=[],l=[],c={_version:"3.3.1",_config:{classPrefix:"",enableClasses:!0,enableJSClass:!0,usePrefixes:!0},_q:[],on:function(e,n){var s=this;setTimeout(function(){n(s[e])},0)},addTest:function(e,n,s){l.push({name:e,fn:n,options:s})},addAsyncTest:function(e){l.push({name:null,fn:e})}},Modernizr=function(){};Modernizr.prototype=c,Modernizr=new Modernizr;var f=n.documentElement,u="svg"===f.nodeName.toLowerCase();Modernizr.addTest("cssremunit",function(){var e=i("a").style;try{e.fontSize="3rem"}catch(n){}return/rem/.test(e.fontSize)});var m=c._config.usePrefixes?" -webkit- -moz- -o- -ms- ".split(" "):["",""];c._prefixes=m,Modernizr.addTest("csscalc",function(){var e="width:",n="calc(10px);",s=i("a");return s.style.cssText=e+m.join(n+e),!!s.style.length}),a(),o(r),delete c.addTest,delete c.addAsyncTest;for(var p=0;p<Modernizr._q.length;p++)Modernizr._q[p]();e.Modernizr=Modernizr}(window,document);
-
-});
 
